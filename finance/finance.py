@@ -62,14 +62,18 @@ class voucher(models.Model):
         compute='_compute_period_id', ondelete='restrict', store=True)
     line_ids = fields.One2many('voucher.line', 'voucher_id', u'凭证明细')
     amount_text = fields.Float(u'总计', compute='_compute_amount', store=True,
-                               track_visibility='always')
+                               track_visibility='always',help=u'凭证金额')
     state = fields.Selection([('draft', u'草稿'),
                               ('done', u'已审核')], u'状态', default='draft',
-                             track_visibility='always')
-    is_checkout = fields.Boolean(u'结账凭证')
+                             track_visibility='always',help=u'凭证所属状态!')
+    is_checkout = fields.Boolean(u'结账凭证',help=u'是否是结账凭证!')
 
     @api.one
     def voucher_done(self):
+        """
+        审核 凭证按钮 所调用的方法
+        :return: 主要是把 凭证的 state改变
+        """
         if self.state == 'done':
             raise except_orm(u'错误', u'请不要重复审核！')
         if self.period_id.is_closed is True:
@@ -127,7 +131,7 @@ class voucher(models.Model):
         if len(vals) == 1 and vals.get('state', False):  # 审核or反审核
             return super(voucher, self).write(vals)
         else:
-            if self.state == 'done':
+            if self.state == 'done' and (not vals.get('name', False)):
                 raise except_orm(u'错误', u'凭证已审核！修改请先反审核！')
         return super(voucher, self).write(vals)
 
@@ -140,6 +144,9 @@ class voucher_line(models.Model):
     account_id = fields.Many2one(
         'finance.account', u'会计科目',
         ondelete='restrict', required=True)
+    currency_amount = fields.Float(u'外币金额', digits=dp.get_precision(u'金额'))
+    currency_id = fields.Many2one('res.currency', u'外币币别', ondelete='restrict')
+    rate_silent = fields.Float(u'汇率')
     debit = fields.Float(u'借方金额', digits=dp.get_precision(u'金额'))
     credit = fields.Float(u'贷方金额', digits=dp.get_precision(u'金额'))
     partner_id = fields.Many2one('partner', u'往来单位', ondelete='restrict')
@@ -295,6 +302,8 @@ class finance_account(models.Model):
         ('in', u'收入类'),
         ('out', u'费用类')
     ], u'类型', required="1")
+    currency_id = fields.Many2one('res.currency', u'外币币别')
+    exchange = fields.Boolean(u'是否期末调汇')
 
     _sql_constraints = [
         ('name_uniq', 'unique(name)', u'科目名称必须唯一!'),
@@ -357,7 +366,15 @@ class res_company(models.Model):
 
 class bank_account(models.Model):
     _inherit = 'bank.account'
+
+    @api.one
+    @api.depends('account_id')
+    def _compute_currency_id(self):
+        self.currency_id = self.account_id.currency_id.id
+
     account_id = fields.Many2one('finance.account', u'科目')
+    currency_id = fields.Many2one('res.currency', u'外币币别', compute='_compute_currency_id', store=True, readonly=True)
+    currency_amount = fields.Float(u'外币金额', digits=dp.get_precision(u'金额'), readonly=True)
 
 
 class core_category(models.Model):
