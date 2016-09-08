@@ -126,18 +126,46 @@ class voucher(models.Model):
     # 重载write 方法
     @api.multi
     def write(self, vals):
+        if self.env.context.get('call_module', False) == "checkout_wizard":
+            return super(voucher, self).write(vals)
         if self.period_id.is_closed is True:
             raise except_orm(u'错误', u'该会计期间已结账，凭证不能再修改！')
         if len(vals) == 1 and vals.get('state', False):  # 审核or反审核
             return super(voucher, self).write(vals)
         else:
-            if self.state == 'done' and (not vals.get('name', False)):
+            if self.state == 'done':
                 raise except_orm(u'错误', u'凭证已审核！修改请先反审核！')
         return super(voucher, self).write(vals)
 
 class voucher_line(models.Model):
     '''凭证明细'''
     _name = 'voucher.line'
+
+    @api.model
+    def _default_get(self, fields):
+        data = super(voucher_line, self).default_get(fields)
+        move_obj = self.env['voucher']
+        total = 0.0
+        context= self._context
+        if  context.get('line_ids'):
+            for move_line_dict in move_obj.resolve_2many_commands('line_ids', context.get('line_ids')):
+                data['name'] = data.get('name') or move_line_dict.get('name')
+                data['partner_id'] = data.get('partner_id') or move_line_dict.get('partner_id')
+                data['account_id'] = data.get('account_id') or move_line_dict.get('account_id')
+                data['auxiliary_id'] = data.get('auxiliary_id') or move_line_dict.get('auxiliary_id')
+                data['goods_id'] = data.get('goods_id') or move_line_dict.get('goods_id')
+                total += move_line_dict.get('debit', 0.0) - move_line_dict.get('credit', 0.0)
+            data['debit'] = total < 0 and -total or 0.0
+            data['credit'] = total > 0 and total or 0.0
+        return data
+
+    @api.model
+    def default_get(self, fields):
+        data = self._default_get(fields)
+        for f in data.keys():
+            if f not in fields:
+                del data[f]
+        return data
 
     voucher_id = fields.Many2one('voucher', u'对应凭证', ondelete='cascade')
     name = fields.Char(u'摘要', required=True)
