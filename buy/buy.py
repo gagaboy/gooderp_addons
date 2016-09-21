@@ -449,11 +449,9 @@ class buy_order_line(models.Model):
     def _compute_all_amount(self):
         '''当订单行的数量、含税单价、折扣额、税率改变时，改变购货金额、税额、价税合计'''
         self.price = self.price_taxed / (1 + self.tax_rate * 0.01)
-        amount = self.quantity * self.price - self.discount_amount  # 折扣后金额
-        tax_amt = amount * self.tax_rate * 0.01  # 税额
-        self.tax_amount = tax_amt
-        self.subtotal = self.quantity * self.price_taxed
-        self.amount = self.subtotal - tax_amt
+        self.amount = self.quantity * self.price - self.discount_amount  # 折扣后金额
+        self.tax_amount = self.amount * self.tax_rate * 0.01  # 税额
+        self.subtotal = self.amount + self.tax_amount
 
     order_id = fields.Many2one('buy.order', u'订单编号', select=True,
                                required=True, ondelete='cascade',
@@ -948,32 +946,17 @@ class wh_move_line(models.Model):
     @api.multi
     @api.onchange('goods_id')
     def onchange_goods_id(self):
-        '''当订单行的产品变化时，带出产品上的成本价，以及公司的进项税、销项税'''
+        '''当订单行的产品变化时，带出产品上的成本价，以及公司的进项税'''
         if self.goods_id:
-            partner_id = self.env.context.get('default_partner')
-            partner = self.env['partner'].search([('id', '=', partner_id)])
             is_return = self.env.context.get('default_is_return')
-            if self.type == 'in':
-                if not self.goods_id.cost:
-                    raise except_orm(u'错误', u'请先设置商品的成本！')
+            if not self.goods_id.cost:
+                raise except_orm(u'错误', u'请先设置商品的成本！')
+            # 如果是采购入库单行 或 采购退货单行
+            if (self.type == 'in' and not is_return) or (self.type == 'out' and is_return):
                 self.tax_rate = self.env.user.company_id.import_tax_rate
                 self.price_taxed = self.goods_id.cost
-                # 如果是销售退货单行
-                if is_return:
-                    self.tax_rate = self.env.user.company_id.output_tax_rate
-                    self.price_taxed = self.goods_id.price
-            elif self.type == 'out':
-                self.tax_rate = self.env.user.company_id.output_tax_rate
-                self.price_taxed = self.goods_id.price
-                # 如果是采购退货单行
-                if is_return:
-                    if not self.goods_id.cost:
-                        raise except_orm(u'错误', u'请先设置商品的成本！')
-                    self.tax_rate = self.env.user.company_id.import_tax_rate
-                    self.price_taxed = self.goods_id.cost
 
         return super(wh_move_line,self).onchange_goods_id()
-
 
 
 class cost_line(models.Model):
@@ -1146,11 +1129,9 @@ class buy_adjust_line(models.Model):
     def _compute_all_amount(self):
         '''当订单行的数量、单价、折扣额、税率改变时，改变购货金额、税额、价税合计'''
         self.price = self.price_taxed / (1 + self.tax_rate * 0.01)
-        amount = self.quantity * self.price - self.discount_amount  # 折扣后金额
-        tax_amt = amount * self.tax_rate * 0.01  # 税额
-        self.tax_amount = tax_amt
-        self.subtotal = self.quantity * self.price_taxed
-        self.amount = self.subtotal - tax_amt
+        self.amount = self.quantity * self.price - self.discount_amount  # 折扣后金额
+        self.tax_amount = self.amount * self.tax_rate * 0.01  # 税额
+        self.subtotal = self.amount + self.tax_amount
 
     order_id = fields.Many2one('buy.adjust', u'订单编号', select=True,
                                required=True, ondelete='cascade',

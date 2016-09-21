@@ -123,6 +123,7 @@ class sell_order(models.Model):
                              help=u"销货订单的审核状态", select=True, 
                              copy=False, default='draft')
     goods_state = fields.Char(u'发货状态', compute=_get_sell_goods_state,
+                              default=u'未出库',
                               store=True,
                               help=u"销货订单的发货状态", select=True, copy=False)
     amount_executed = fields.Float(u'已执行金额',
@@ -361,11 +362,9 @@ class sell_order_line(models.Model):
         '''当订单行的数量、含税单价、折扣额、税率改变时，改变销售金额、税额、价税合计'''
         if self.order_id.currency_id.id == self.env.user.company_id.currency_id.id :
             self.price = self.price_taxed / (1 + self.tax_rate * 0.01)
-            amount = self.quantity * self.price - self.discount_amount  # 折扣后金额 
-            tax_amt = amount * self.tax_rate * 0.01  # 税额 
-            self.tax_amount = tax_amt
-            self.subtotal = self.quantity * self.price_taxed
-            self.amount = self.subtotal - tax_amt
+            self.amount = self.quantity * self.price - self.discount_amount  # 折扣后金额
+            self.tax_amount = self.amount * self.tax_rate * 0.01  # 税额
+            self.subtotal = self.amount + self.tax_amount
         else :
             rate_silent = self.order_id.currency_id.rate_silent or self.env.user.company_id.currency_id.rate_silent
             currency_amount = self.quantity * self.price_taxed - self.discount_amount
@@ -723,10 +722,8 @@ class sell_delivery(models.Model):
             amount = self.amount + self.partner_cost
             if amount + self.partner_id.receivable > self.partner_id.credit_limit:
                 raise except_orm(u'警告！', u'本次发货金额 + 客户应收余额 不能大于客户信用额度！')
-            self.partner_id.credit_limit -= amount # 更新客户信用额度
         else:
             amount = self.amount + self.partner_cost
-            self.partner_id.credit_limit += amount
 
         # 发库单/退货单 生成源单
         if not self.is_return:
@@ -813,12 +810,10 @@ class sell_delivery(models.Model):
         # 发库单/退货单 计算客户的 本次退货金额+客户应收余额 是否小于客户信用额度， 否则报错
         if not self.is_return:
             amount = self.amount + self.partner_cost
-            self.partner_id.credit_limit += amount  # 更新客户信用额度
         else:
             amount = self.amount + self.partner_cost
             if amount + self.partner_id.receivable > self.partner_id.credit_limit:
                 raise except_orm(u'警告！', u'本次退货金额 + 客户应收余额 不能大于客户信用额度！')
-            self.partner_id.credit_limit -= amount
 
         # 查找产生的收款单
         source_line = self.env['source.order.line'].search(
@@ -874,6 +869,19 @@ class wh_move_line(models.Model):
                 self.discount_rate = pricing.discount_rate
             else:
                 self.discount_rate = 0
+
+    @api.multi
+    @api.onchange('goods_id')
+    def onchange_goods_id(self):
+        '''当订单行的产品变化时，带出产品上的零售价，以及公司的销项税'''
+        if self.goods_id:
+            is_return = self.env.context.get('default_is_return')
+            # 如果是销售发货单行 或 销售退货单行
+            if (self.type == 'out' and not is_return) or (self.type == 'in' and is_return):
+                self.tax_rate = self.env.user.company_id.output_tax_rate
+                self.price_taxed = self.goods_id.price
+
+        return super(wh_move_line,self).onchange_goods_id()
 
 class cost_line(models.Model):
     _inherit = 'cost.line'
@@ -1043,11 +1051,9 @@ class sell_adjust_line(models.Model):
     def _compute_all_amount(self):
         '''当订单行的数量、单价、折扣额、税率改变时，改变购货金额、税额、价税合计'''
         self.price = self.price_taxed / (1 + self.tax_rate * 0.01)
-        amount = self.quantity * self.price - self.discount_amount  # 折扣后金额
-        tax_amt = amount * self.tax_rate * 0.01  # 税额
-        self.tax_amount = tax_amt
-        self.subtotal = self.quantity * self.price_taxed
-        self.amount = self.subtotal - tax_amt
+        self.amount = self.quantity * self.price - self.discount_amount  # 折扣后金额
+        self.tax_amount = self.amount * self.tax_rate * 0.01  # 税额
+        self.subtotal = self.amount + self.tax_amount
 
     order_id = fields.Many2one('sell.adjust', u'订单编号', select=True,
                                required=True, ondelete='cascade',
