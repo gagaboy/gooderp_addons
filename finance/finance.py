@@ -4,6 +4,7 @@ from openerp import models, fields, api
 import openerp.addons.decimal_precision as dp
 from openerp.exceptions import except_orm, ValidationError
 from datetime import datetime
+import calendar
 
 FIANNCE_CATEGORY_TYPE = [
     ('finance_account', u'会计科目'),
@@ -68,6 +69,7 @@ class voucher(models.Model):
                               ('done', u'已审核')], u'状态', default='draft',
                              track_visibility='always',help=u'凭证所属状态!')
     is_checkout = fields.Boolean(u'结账凭证',help=u'是否是结账凭证!')
+    is_init = fields.Boolean(u'是否初始化凭证',help=u'是否是初始化凭证!')
 
     @api.one
     def voucher_done(self):
@@ -191,6 +193,7 @@ class voucher_line(models.Model):
     date = fields.Date(compute='_compute_voucher_date', store=True, string=u'凭证日期')
     state = fields.Selection([('draft', u'草稿'),('done', u'已审核')], compute='_compute_voucher_state',
                              store=True, string=u'状态')
+    init_obj = fields.Char(u'摘要', help='描述本条凭证行由哪个单证生成而来！')
 
     @api.one
     @api.depends('voucher_id.date')
@@ -274,6 +277,11 @@ class finance_period(models.Model):
         period_row = self.env['finance.period'].search(
             [('year', '=', datetime_str_list[0]), ('month', '=', str(int(datetime_str_list[1])))])
         return period_row and period_row[0]
+
+    @api.multi
+    def get_period_month_date_range(self, period_id):
+        month_day_range = calendar.monthrange(int(period_id.year), int(period_id.month))
+        return ("%s-%s-01" % (period_id.year, period_id.month), "%s-%s-%s" % (period_id.year, period_id.month, str(month_day_range[1])))
 
     @api.multi
     def get_year_fist_period_id(self):
@@ -419,3 +427,9 @@ class bank_account(models.Model):
 class core_category(models.Model):
     _inherit = 'core.category'
     account_id = fields.Many2one('finance.account', u'科目', help=u'科目')
+
+class chang_voucher_name(models.Model) :
+    _name = 'chang.voucher.name'
+    period_id = fields.Many2one('finance.period', u'会计期间')
+    before_voucher_name = fields.Char(u'以前凭证号')
+    after_voucher_name = fields.Char(u'更新后凭证号')

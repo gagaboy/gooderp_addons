@@ -14,7 +14,7 @@
 					<field name='tax'/>
 					<field name='no_depreciation'/>
 					<field name='depreciation_number'/>
-					<field name='attribute'/>
+					<field name='category_id'/>
                     <field name='state'/>
 				</tree>
 			</field>
@@ -101,7 +101,7 @@
                 <form string="固定资产">
 	                <header>
 	                	<button name='asset_done' states="draft" string="审核" type="object" class="oe_highlight"/>
-	                	<button name='asset_draft' states="done" string="反审核" type="object" invisible="1"/>
+	                	<button name='asset_draft' states="done" string="反审核" type="object" />
                         <button name="%(create_clean_action)d" string="清理固定资产" type="action" class="btn-primary"
                         attrs="{'invisible': [('state', '!=', 'done')]}"/>
                         <button name="%(create_chang_action)d" string="变更固定资产" type="action" class="btn-primary"
@@ -120,14 +120,14 @@
                                 <field name="partner_id" domain="[('s_category_id', '!=', False)]" context="{'form_view_ref': 'core.supplier_address_form'}"/>
                                 <field name="bank_account"/>
                                 <field name="no_depreciation"/>
-                                <field name="other_system" groups='core.master_groups'/>
-                                <field name="attribute"/>
+                                <field name="is_init" groups='core.master_groups'/>
+                                <field name="category_id"/>
                             </group>
                             <group>
                                 <field name="cost"/>
                                 <field name="tax"/>
                                 <field name="amount"/>
-                                <field name="depreciation_value2"/>
+                                <field name="depreciation_previous"/>
                                 <field name="surplus_value"/>
                                 <field name="depreciation_number"/>
                                 <field name="depreciation_value"/>
@@ -136,7 +136,7 @@
                                 <field name="account_asset"/>
                                 <field name="account_credit"/>
                                 <field name="account_depreciation"/>
-                                <field name="account_depreciation2"/>
+                                <field name="account_accumulated_depreciation"/>
                                 <field name="cost_depreciation"/>
                             </group>
                         </group>
@@ -251,7 +251,7 @@
 			<field name='arch' type='xml'>
 				<tree string='固定资产分类'>
 					<field name='name'/>
-					<field name='account_depreciation2'/>
+					<field name='account_accumulated_depreciation'/>
 					<field name='account_asset'/>
 					<field name='account_depreciation'/>
                     <field name='depreciation_number'/>
@@ -268,6 +268,19 @@
             <field name="type">ir.actions.act_window</field>
             <field name="view_mode">tree,form</field>
         </record>
+
+        <record id="init_asset_form" model="ir.ui.view">
+            <field name="name">init.asset.form</field>
+            <field name="model">voucher</field>
+            <field name="inherit_id" ref="finance.voucher_form"/>
+            <field name="arch" type="xml">
+                <button  name="voucher_done" position="after">
+                    <button name='init_asset' string="引入固定资产" type="object" class="oe_highlight" attrs="{'invisible': ['|',('is_init', '=', False), ('state', '=', 'done')]}"/>
+                </button>
+            </field>
+        </record>
+
+
 
         <menuitem id='asset_home_menu_finance' name='固定资产' action="asset_action"
                   parent='finance.voucher_home_menu' sequence='11'/>
