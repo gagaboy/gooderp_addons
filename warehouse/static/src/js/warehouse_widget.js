@@ -1,4 +1,4 @@
-openerp.warehouse = function(instance) {
+odoo.warehouse = function(instance) {
     instance.web.list.Column.include({
         _format: function(row_data, options) {
             if (this.widget === 'selection_clickable' && !_.isUndefined(this.selection)) {
@@ -141,11 +141,11 @@ openerp.warehouse = function(instance) {
         },
     });
 
-    instance.web.ListView.List.include({
+    ListView.List.include({
         init: function () {
             this._super.apply(this, arguments);
             var self = this;
-            self.$current = self.$current.delegate('td.oe_list_record_copy button', 'click', function (e){
+            self.$current = self.$current.delegate('td.oe_list_record_copy', 'click', function (e){
                 e.stopPropagation();
                 var $target = $(e.target),
                     $row = $target.closest('tr'),
@@ -154,7 +154,7 @@ openerp.warehouse = function(instance) {
                 self.view.do_copy_record(record);
             });
         },
-    });
+	});
 
     instance.web.FormView.include({
     	load_form: function() {

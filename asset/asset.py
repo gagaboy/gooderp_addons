@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 
-from openerp import models, fields, api
-import openerp.addons.decimal_precision as dp
-from openerp.exceptions import except_orm, ValidationError
+from odoo import models, fields, api
+import odoo.addons.decimal_precision as dp
+from odoo.exceptions import UserError, ValidationError
 from datetime import datetime
 
 # 字段只读状态
@@ -94,7 +94,7 @@ class asset(models.Model):
     voucher_id = fields.Many2one('voucher', u'对应凭证', readonly=True, ondelete='restrict')
     money_invoice = fields.Many2one('money.invoice', u'对应源单', readonly=True, ondelete='restrict')
     other_money_order = fields.Many2one('other.money.order', u'对应其他应付款单', readonly=True, ondelete='restrict')
-    @api.one
+
     @api.onchange('category_id')
     def onchange_category_id(self):
         '''当固定资产分类发生变化时，折旧期间数，固定资产科目，累计折旧科目，最终残值同时变化'''
@@ -105,21 +105,18 @@ class asset(models.Model):
             self.account_depreciation = self.category_id.account_depreciation
             self.depreciation_value = self.category_id.depreciation_value * self.cost / 100
 
-    @api.one
     @api.onchange('cost')
     def onchange_cost(self):
         '''当固定资产金额发生变化时，最终残值，价格合计,残值，每月折旧额变化'''
         if self.cost:
             self.depreciation_value = self.category_id.depreciation_value * self.cost / 100
 
-    @api.one
     @api.onchange('partner_id')
     def onchange_partner_id(self):
         '''当合作伙伴发生变化时，固定资产贷方科目变化'''
         if self.partner_id:
             self.account_credit = self.partner_id.s_category_id.account_id
 
-    @api.one
     @api.onchange('bank_account')
     def onchange_bank_account(self):
         '''当结算帐户发生变化时，固定资产贷方科目变化'''
@@ -129,15 +126,15 @@ class asset(models.Model):
     @api.one
     def _wrong_asset_done(self):
         if self.state == 'done':
-            raise except_orm(u'错误', u'请不要重复审核！')
+            raise UserError(u'请不要重复审核！')
         if self.period_id.is_closed:
-            raise except_orm(u'错误', u'该会计期间已结账！不能审核')
+            raise UserError(u'该会计期间已结账！不能审核')
         if self.cost <= 0:
-            raise except_orm(u'错误', u'金额必须大于0！')
+            raise UserError(u'金额必须大于0！')
         if self.tax < 0:
-            raise except_orm(u'错误', u'税额必须大于0！')
+            raise UserError(u'税额必须大于0！')
         if self.depreciation_previous < 0:
-            raise except_orm(u'错误', u'以前折旧必须大于0！')
+            raise UserError(u'以前折旧必须大于0！')
         return
 
     @api.one
@@ -218,13 +215,13 @@ class asset(models.Model):
     def asset_draft(self):
         ''' 反审核固定资产 '''
         if self.state == 'draft':
-            raise except_orm(u'错误', u'请不要重复反审核！')
+            raise UserError(u'请不要重复反审核！')
         if self.line_ids :
-            raise except_orm(u'错误', u'已折旧不能反审核！')
+            raise UserError(u'已折旧不能反审核！')
         if self.chang_ids :
-            raise except_orm(u'错误', u'已变更不能反审核！')
+            raise UserError(u'已变更不能反审核！')
         if self.period_id.is_closed:
-            raise except_orm(u'错误', u'该会计期间已结账！不能反审核')
+            raise UserError(u'该会计期间已结账！不能反审核')
         self.state = 'draft'
         '''删掉凭证'''
         if self.voucher_id:
@@ -249,7 +246,7 @@ class asset(models.Model):
     def unlink(self):
         for record in self:
             if record.state != 'draft':
-                raise except_orm(u'错误', u'只能删除草稿状态的固定资产')
+                raise UserError(u'只能删除草稿状态的固定资产')
 
         return super(asset, self).unlink()
 
@@ -505,7 +502,7 @@ class CreateDepreciationWizard(models.TransientModel):
 
         if not vouch_obj.line_ids:
             vouch_obj.unlink()
-            raise except_orm(u'错误', u'本期所有固定资产都已折旧！')
+            raise UserError(u'本期所有固定资产都已折旧！')
         vouch_obj.voucher_done()
         view = self.env.ref('asset.asset_line_tree')
         return {

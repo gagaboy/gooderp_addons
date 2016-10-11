@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-from openerp.tests.common import TransactionCase
-from openerp.exceptions import except_orm
+from odoo.tests.common import TransactionCase
+from odoo.exceptions import UserError
 import operator
 
 
@@ -49,10 +49,10 @@ class TestReport(TransactionCase):
 
     def test_open_report(self):
         # 测试批号跟踪表的wizard
-        self.assertEqual(self.track_wizard.onchange_date()[0], {})
+        self.assertEqual(self.track_wizard.onchange_date(), {})
 
         self.track_wizard.date_end = '1999-09-09'
-        results = self.track_wizard.onchange_date()[0]
+        results = self.track_wizard.onchange_date()
         real_results = {'warning': {
             'title': u'错误',
             'message': u'结束日期不可以小于开始日期'
@@ -64,10 +64,10 @@ class TestReport(TransactionCase):
         self.env['report.lot.track.wizard'].create({})
 
         # 测试商品收发明细表的wizard
-        self.assertEqual(self.transceive_wizard.onchange_date()[0], {})
+        self.assertEqual(self.transceive_wizard.onchange_date(), {})
 
         self.transceive_wizard.date_end = '1999-09-09'
-        results = self.transceive_wizard.onchange_date()[0]
+        results = self.transceive_wizard.onchange_date()
         real_results = {'warning': {
             'title': u'错误',
             'message': u'结束日期不可以小于开始日期'
@@ -121,17 +121,17 @@ class TestReport(TransactionCase):
             self.assertTrue(result in real_results)
 
         # domain条件中不是列表或元祖的
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             domain = ['domain']
             lot_track.with_context(context).search_read(domain=domain)
 
         # domain条件中长度不为3的
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             domain = [('goods', u'鼠标')]
             lot_track.with_context(context).search_read(domain=domain)
 
         # domain条件中使用不合法的操作符
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             domain = [('goods', 'lg', u'鼠标')]
             lot_track.with_context(context).search_read(domain=domain)
 

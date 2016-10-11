@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from datetime import date, timedelta
-from openerp import models, fields, api
+from odoo import models, fields, api
 
 
 class report_lot_track_wizard(models.TransientModel):
@@ -28,7 +28,6 @@ class report_lot_track_wizard(models.TransientModel):
     goods = fields.Char(u'产品',
                         help=u'本次报表查看的产品')
 
-    @api.one
     @api.onchange('date_start', 'date_end')
     def onchange_date(self):
         if self.date_start and self.date_end and self.date_end < self.date_start:

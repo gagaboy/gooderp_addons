@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 
 from datetime import date
-from openerp import models, fields, api
-from openerp.exceptions import except_orm
+from odoo import models, fields, api
+from odoo.exceptions import UserError
 
 
 class sell_order_detail_wizard(models.TransientModel):
@@ -34,7 +34,7 @@ class sell_order_detail_wizard(models.TransientModel):
     def button_ok(self):
         '''向导上的确定按钮'''
         if self.date_end < self.date_start:
-            raise except_orm(u'错误', u'开始日期不能大于结束日期！')
+            raise UserError(u'开始日期不能大于结束日期！')
 
         domain = [('date', '>=', self.date_start),
                   ('date', '<=', self.date_end),
@@ -54,7 +54,7 @@ class sell_order_detail_wizard(models.TransientModel):
         return {
             'name': u'销售明细表',
             'view_type': 'form',
-            'view_mode': 'tree,graph',
+            'view_mode': 'tree,pivot',
             'view_id': False,
             'views': [(view.id, 'tree'),(graph_view.id,'graph')],
             'res_model': 'sell.order.detail',

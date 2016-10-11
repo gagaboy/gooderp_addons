@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-from openerp.tests.common import TransactionCase
-from openerp.exceptions import except_orm
+from odoo.tests.common import TransactionCase
+from odoo.exceptions import UserError
 from datetime import datetime
 ISODATEFORMAT = '%Y-%m-%d'
 ISODATETIMEFORMAT = "%Y-%m-%d %H:%M:%S"
@@ -56,7 +56,7 @@ class Test_sell(TransactionCase):
         vals = {'partner_id': partner_objs.id}
         order_no_line = self.env['sell.order'].create(vals)
         # 没有订单行的销售订单
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             order_no_line.sell_order_done()
 
         self.order.sell_order_done()
@@ -69,7 +69,7 @@ class Test_sell(TransactionCase):
             self.order.line_ids.write({'quantity_out': goods_state[1]})
             self.assertEqual(self.order.goods_state, goods_state[0])
             if goods_state[1] != 0:
-                with self.assertRaises(except_orm):
+                with self.assertRaises(UserError):
                     self.order.sell_order_done()
                     self.order.sell_order_draft()
             else:
@@ -128,14 +128,14 @@ class Test_sell(TransactionCase):
         #  结算账户 需要输入付款额 测试
         self.sell_delivery_obj.bank_account_id = self.bank.id
         self.sell_delivery_obj.receipt = False
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             self.sell_delivery_obj.sell_delivery_done()
 
     def test_no_account_id(self):
         """销售发货单付款账户审核时为空 测试"""
         self.sell_delivery.bank_account_id = False
         self.sell_delivery.receipt = 20
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             self.sell_delivery.sell_delivery_done()
 
     def test_sale_usage_return(self):
@@ -159,7 +159,7 @@ class Test_sell(TransactionCase):
         self.sell_delivery.receipt = 100000
         self.sell_delivery.amount = 10
         self.sell_delivery.bank_account_id = self.bank.id
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             self.sell_delivery.sell_delivery_done()
 
 
@@ -222,7 +222,7 @@ class test_sell_order(TransactionCase):
     def test_unlink(self):
         '''测试删除已审核的销货订单'''
         self.order.sell_order_done()
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             self.order.unlink()
         # 删除草稿状态的销货订单
         self.order.copy()
@@ -233,14 +233,14 @@ class test_sell_order(TransactionCase):
         '''测试审核销货订单'''
         # 审核销货订单
         self.order.sell_order_done()
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             self.order.sell_order_done()
 
         # 未填数量应报错
         self.order.sell_order_draft()
         for line in self.order.line_ids:
             line.quantity = 0
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             self.order.sell_order_done()
 
         # 输入预收款和结算账户
@@ -256,25 +256,25 @@ class test_sell_order(TransactionCase):
         self.order.sell_order_draft()
         self.order.bank_account_id = False
         self.order.pre_receipt = 50.0
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             self.order.sell_order_done()
         # 结算账户不为空时，需要输入预收款！
         self.order.bank_account_id = bank_account
         self.order.pre_receipt = 0
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             self.order.sell_order_done()
 
         # 没有订单行时审核报错
         for line in self.order.line_ids:
             line.unlink()
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             self.order.sell_order_done()
 
     def test_sell_order_draft(self):
         ''' 测试反审核销货订单  '''
         self.order.sell_order_done()
         self.order.sell_order_draft()
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             self.order.sell_order_draft()
 
 
@@ -291,11 +291,17 @@ class test_sell_order_line(TransactionCase):
             line.goods_id = self.env.ref('goods.keyboard')
             self.assertTrue(line.using_attribute)
 
+    def test_compute_all_amount(self):
+        '''外币测试：当订单行的数量、含税单价、折扣额、税率改变时，改变销售金额、税额、价税合计'''
+        self.order.currency_id = self.env.ref('base.EUR')
+        for line in self.order.line_ids:
+            line.price_taxed = 11.7
+
     def test_onchange_goods_id(self):
         '''当销货订单行的产品变化时，带出产品上的单位、价格'''
         goods = self.env.ref('goods.keyboard')
         c_category_id = self.order.partner_id.c_category_id
-    
+
         for line in self.order.line_ids:
             line.goods_id = goods
             line.onchange_goods_id()
@@ -405,7 +411,7 @@ class test_sell_delivery(TransactionCase):
         '''测试删除销售发货/退货单'''
         # 测试是否可以删除已审核的单据
         self.delivery.sell_delivery_done()
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             self.delivery.unlink()
 
         # 删除销售发货单时，测试能否删除发货单行
@@ -422,23 +428,23 @@ class test_sell_delivery(TransactionCase):
         # 销售发货单重复审核
         delivery = self.delivery.copy()
         delivery.sell_delivery_done()
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             delivery.sell_delivery_done()
         # 发货单审核时未填数量应报错
         for line in self.delivery.line_out_ids:
             line.goods_qty = 0
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             self.delivery.sell_delivery_done()
         # 销售退货单审核时未填数量应报错
         for line in self.return_delivery.line_in_ids:
             line.goods_qty = 0
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             self.return_delivery.sell_delivery_done()
 
     def test_sell_delivery_done_raise_credit_limit(self):
         '''审核发货单/退货单 客户的 本次发货金额+客户应收余额 不能大于客户信用额度'''
         self.delivery.amount = 20000000
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             self.delivery.sell_delivery_done()
 
     def test_sell_delivery_draft(self):
@@ -579,14 +585,14 @@ class test_pricing(TransactionCase):
         date = 20160101
         partner = self.env.ref('core.zt')
         pricing = self.env['pricing']
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             pricing.get_pricing_id(False, warehouse, goods, date)
         
 
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             pricing.get_pricing_id(partner, False, goods, date)
 
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             pricing.get_pricing_id(partner, warehouse, False, date)
 
     def test_good_pricing(self):
@@ -605,7 +611,7 @@ class test_pricing(TransactionCase):
                                     ('deactive_date', '>=', date)
                                     ])
         cp = good_pricing.copy()
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             pricing.get_pricing_id(partner, warehouse, goods, date)
     
     def test_gc_pricing(self):
@@ -624,7 +630,7 @@ class test_pricing(TransactionCase):
                                   ('deactive_date','>=',date)
                                   ])
         cp = gc_pricing.copy()
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             pricing.get_pricing_id(partner, warehouse, goods, date)
 
     def test_pw_pricing(self):
@@ -643,7 +649,7 @@ class test_pricing(TransactionCase):
                                   ('deactive_date','>=',date)
                                   ])
         cp = pw_pricing.copy()
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             pricing.get_pricing_id(partner, warehouse, goods, date)
 
     def test_wg_pricing(self):
@@ -662,7 +668,7 @@ class test_pricing(TransactionCase):
                                       ('deactive_date','>=',date)
                                       ])
         cp = wg_pricing.copy()
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             pricing.get_pricing_id(partner, warehouse, goods, date)
     
     def test_w_gc_pricing(self):
@@ -681,7 +687,7 @@ class test_pricing(TransactionCase):
                                       ('deactive_date','>=',date)
                                       ])
         cp = w_gc_pricing.copy()
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             pricing.get_pricing_id(partner, warehouse, goods, date)
     
     def test_warehouse_pricing(self):
@@ -700,7 +706,7 @@ class test_pricing(TransactionCase):
                                       ('deactive_date','>=',date)
                                       ])
         cp = warehouse_pricing.copy()
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             pricing.get_pricing_id(partner, warehouse, goods, date)
     
     def test_ccg_pricing(self):
@@ -719,7 +725,7 @@ class test_pricing(TransactionCase):
                                       ('deactive_date','>=',date)
                                       ])
         cp = ccg_pricing.copy()
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             pricing.get_pricing_id(partner, warehouse, goods, date)
     
     def test_ccgc_pricing(self):
@@ -738,7 +744,7 @@ class test_pricing(TransactionCase):
                                       ('deactive_date','>=',date)
                                       ])
         cp = ccgc_pricing.copy()
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             pricing.get_pricing_id(partner, warehouse, goods, date)
 
     def test_partner_pricing(self):
@@ -757,7 +763,7 @@ class test_pricing(TransactionCase):
                                       ('deactive_date','>=',date)
                                       ])
         cp = partner_pricing.copy()
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             pricing.get_pricing_id(partner, warehouse, goods, date)
 
     def test_all_goods_pricing(self):
@@ -776,7 +782,7 @@ class test_pricing(TransactionCase):
                                       ('deactive_date','>=',date)
                                       ])
         cp = all_goods_pricing.copy()
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             pricing.get_pricing_id(partner, warehouse, goods, date)
 
 
@@ -810,7 +816,7 @@ class test_sell_adjust(TransactionCase):
                          ]
         })
         adjust.sell_adjust_done()
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             adjust.unlink()
         # 删除草稿状态的销售调整单
         new = adjust.copy()
@@ -835,7 +841,7 @@ class test_sell_adjust(TransactionCase):
         })
         adjust.sell_adjust_done()
         # 重复审核时报错
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             adjust.sell_adjust_done()
 
     def test_sell_adjust_done_no_line(self):
@@ -843,7 +849,7 @@ class test_sell_adjust(TransactionCase):
         adjust = self.env['sell.adjust'].create({
             'order_id': self.order.id,
         })
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             adjust.sell_adjust_done()
 
     def test_sell_adjust_done_all_in(self):
@@ -861,7 +867,7 @@ class test_sell_adjust(TransactionCase):
                                 }),
                          ]
         })
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             adjust.sell_adjust_done()
 
     def test_sell_adjust_done_more_same_line(self):
@@ -884,7 +890,7 @@ class test_sell_adjust(TransactionCase):
                                 }),
                          ]
         })
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             adjust.sell_adjust_done()
 
     def test_sell_adjust_done_quantity_lt(self):
@@ -900,7 +906,7 @@ class test_sell_adjust(TransactionCase):
                                 'quantity': -5,
                                 })]
         })
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             adjust.sell_adjust_done()
 
     def test_sell_adjust_done_quantity_equal(self):
@@ -945,7 +951,7 @@ class test_sell_adjust(TransactionCase):
                             }),
                      ]
         })
-        with self.assertRaises(except_orm):
+        with self.assertRaises(UserError):
             adjust.sell_adjust_done()
 
 

@@ -19,9 +19,9 @@
 #
 ##############################################################################
 
-from openerp import fields, models, api
-import openerp.addons.decimal_precision as dp
-from openerp.exceptions import except_orm
+from odoo import fields, models, api
+import odoo.addons.decimal_precision as dp
+from odoo.exceptions import UserError
 from datetime import datetime
 
 # 购货订单审核状态可选值
@@ -110,14 +110,12 @@ class buy_order(models.Model):
     @api.depends('line_ids.quantity', 'line_ids.quantity_in')
     def _get_buy_goods_state(self):
         '''返回收货状态'''
-        for line in self.line_ids:
-            if line.quantity_in == 0:
-                self.goods_state = u'未入库'
-            elif line.quantity > line.quantity_in:
-                self.goods_state = u'部分入库'
-                break
-            else:
-                self.goods_state = u'全部入库'
+        if all(line.quantity_in == 0 for line in self.line_ids):
+            self.goods_state = u'未入库'
+        elif any(line.quantity > line.quantity_in for line in self.line_ids):
+            self.goods_state = u'部分入库'
+        else:
+            self.goods_state = u'全部入库'
 
     @api.model
     def _default_warehouse_dest(self):
@@ -201,7 +199,6 @@ class buy_order(models.Model):
                               store=True,
                               help=u'购货订单生成的采购入库单或退货单的付/退款状态')
 
-    @api.one
     @api.onchange('discount_rate', 'line_ids')
     def onchange_discount_rate(self):
         '''当优惠率或购货订单行发生变化时，单据优惠金额发生变化'''
@@ -213,7 +210,7 @@ class buy_order(models.Model):
     def unlink(self):
         for order in self:
             if order.state == 'done':
-                raise except_orm(u'错误', u'不能删除已审核的单据')
+                raise UserError(u'不能删除已审核的单据')
 
         return super(buy_order, self).unlink()
 
@@ -252,16 +249,16 @@ class buy_order(models.Model):
     def buy_order_done(self):
         '''审核购货订单'''
         if self.state == 'done':
-            raise except_orm(u'错误', u'请不要重复审核！')
+            raise UserError(u'请不要重复审核！')
         if not self.line_ids:
-            raise except_orm(u'错误', u'请输入产品明细行！')
+            raise UserError(u'请输入产品明细行！')
         for line in self.line_ids:
             if line.quantity <= 0 or line.price_taxed < 0:
-                raise except_orm(u'错误', u'产品 %s 的数量和含税单价不能小于0！' % line.goods_id.name)
+                raise UserError(u'产品 %s 的数量和含税单价不能小于0！' % line.goods_id.name)
         if self.bank_account_id and not self.prepayment:
-            raise except_orm(u'警告！', u'结算账户不为空时，需要输入预付款！')
+            raise UserError(u'结算账户不为空时，需要输入预付款！')
         if not self.bank_account_id and self.prepayment:
-            raise except_orm(u'警告！', u'预付款不为空时，请选择结算账户！')
+            raise UserError(u'预付款不为空时，请选择结算账户！')
         # 采购预付款生成付款单
         self.generate_payment_order()
         self.buy_generate_receipt()
@@ -272,9 +269,9 @@ class buy_order(models.Model):
     def buy_order_draft(self):
         '''反审核购货订单'''
         if self.state == 'draft':
-            raise except_orm(u'错误', u'请不要重复反审核！')
+            raise UserError(u'请不要重复反审核！')
         if self.goods_state != u'未入库':
-            raise except_orm(u'错误', u'该购货订单已经收货，不能反审核！')
+            raise UserError(u'该购货订单已经收货，不能反审核！')
         else:
             # 查找产生的入库单并删除
             receipt = self.env['buy.receipt'].search(
@@ -505,17 +502,16 @@ class buy_order_line(models.Model):
     origin = fields.Char(u'销售单号',
                          help=u'以销订购的销售订单号')
 
-    @api.one
     @api.onchange('goods_id', 'quantity')
     def onchange_goods_id(self):
         '''当订单行的产品变化时，带出产品上的单位、成本价。
         在采购订单上选择供应商，自动带出供货价格，没有设置供货价的取成本价格。'''
         if not self.order_id.partner_id:
-            raise except_orm(u'错误', u'请先选择一个供应商！')
+            raise UserError(u'请先选择一个供应商！')
         if self.goods_id:
             self.uom_id = self.goods_id.uom_id
             if not self.goods_id.cost:
-                raise except_orm(u'错误', u'请先设置商品的成本！')
+                raise UserError(u'请先设置商品的成本！')
             self.price_taxed = self.goods_id.cost
             for line in self.goods_id.vendor_ids:
                 if line.vendor_id == self.order_id.partner_id \
@@ -523,7 +519,6 @@ class buy_order_line(models.Model):
                     self.price_taxed = line.price
                     break
 
-    @api.one
     @api.onchange('quantity', 'price_taxed', 'discount_rate')
     def onchange_discount_rate(self):
         '''当数量、单价或优惠率发生变化时，优惠金额发生变化'''
@@ -627,7 +622,6 @@ class buy_receipt(models.Model):
     voucher_id = fields.Many2one('voucher', u'入库凭证', readonly=True,
                                  help=u'审核时产生的入库凭证')
 
-    @api.one
     @api.onchange('discount_rate', 'line_in_ids', 'line_out_ids')
     def onchange_discount_rate(self):
         '''当优惠率或订单行发生变化时，单据优惠金额发生变化'''
@@ -653,7 +647,7 @@ class buy_receipt(models.Model):
         else:
             name = 'buy.return'
         if vals.get('name', '/') == '/':
-            vals['name'] = self.env['ir.sequence'].get(name) or '/'
+            vals['name'] = self.env['ir.sequence'].next_by_code(name) or '/'
 
         vals.update({
             'origin': self.get_move_origin(vals)
@@ -664,7 +658,7 @@ class buy_receipt(models.Model):
     def unlink(self):
         for receipt in self:
             if receipt.state == 'done':
-                raise except_orm(u'错误', u'不能删除已审核的单据')
+                raise UserError(u'不能删除已审核的单据')
             move = self.env['wh.move'].search([
                 ('id', '=', receipt.buy_move_id.id)
             ])
@@ -676,7 +670,7 @@ class buy_receipt(models.Model):
     @api.one
     def _wrong_receipt_done(self):
         if self.state == 'done':
-            raise except_orm(u'错误', u'请不要重复审核！')
+            raise UserError(u'请不要重复审核！')
         batch_one_list_wh = []
         batch_one_list = []
         for line in self.line_in_ids:
@@ -687,30 +681,30 @@ class buy_receipt(models.Model):
                         batch_one_list_wh.append((move_line.goods_id.id, move_line.lot))
 
             if (line.goods_id.id, line.lot) in batch_one_list_wh:
-                raise except_orm(u'错误', u'仓库已存在相同序列号的产品！')
+                raise UserError(u'仓库已存在相同序列号的产品！')
 
         for line in self.line_in_ids:
             if line.goods_qty <= 0 or line.price_taxed < 0:
-                raise except_orm(u'错误', u'产品 %s 的数量和含税单价不能小于0！' % line.goods_id.name)
+                raise UserError(u'产品 %s 的数量和含税单价不能小于0！' % line.goods_id.name)
             if line.goods_id.force_batch_one:
                 batch_one_list.append((line.goods_id.id, line.lot))
 
         if len(batch_one_list) > len(set(batch_one_list)):
-            raise except_orm(u'错误', u'不能创建相同序列号的产品！')
+            raise UserError(u'不能创建相同序列号的产品！')
 
         for line in self.line_out_ids:
             if line.goods_qty <= 0 or line.price_taxed < 0:
-                raise except_orm(u'错误', u'产品 %s 的数量和含税单价不能小于0！' % line.goods_id.name)
+                raise UserError(u'产品 %s 的数量和含税单价不能小于0！' % line.goods_id.name)
         
         if self.bank_account_id and not self.payment:
-            raise except_orm(u'警告！', u'结算账户不为空时，需要输入付款额！')
+            raise UserError(u'结算账户不为空时，需要输入付款额！')
         if not self.bank_account_id and self.payment:
-            raise except_orm(u'警告！', u'付款额不为空时，请选择结算账户！')
+            raise UserError(u'付款额不为空时，请选择结算账户！')
         if self.payment > self.amount:
-            raise except_orm(u'警告！', u'本次付款金额不能大于折后金额！')
+            raise UserError(u'本次付款金额不能大于折后金额！')
         if (sum(cost_line.amount for cost_line in self.cost_line_ids) != 
             sum(line.share_cost for line in self.line_in_ids)):
-            raise except_orm(u'警告！', u'采购费用还未分摊或分摊不正确！')
+            raise UserError(u'采购费用还未分摊或分摊不正确！')
         return
 
     @api.one
@@ -950,7 +944,7 @@ class wh_move_line(models.Model):
         if self.goods_id:
             is_return = self.env.context.get('default_is_return')
             if not self.goods_id.cost:
-                raise except_orm(u'错误', u'请先设置商品的成本！')
+                raise UserError(u'请先设置商品的成本！')
             # 如果是采购入库单行 或 采购退货单行
             if (self.type == 'in' and not is_return) or (self.type == 'out' and is_return):
                 self.tax_rate = self.env.user.company_id.import_tax_rate
@@ -1036,7 +1030,7 @@ class buy_adjust(models.Model):
     def unlink(self):
         for order in self:
             if order.state == 'done':
-                raise except_orm(u'错误', u'不能删除已审核的单据')
+                raise UserError(u'不能删除已审核的单据')
 
         return super(buy_adjust, self).unlink()
 
@@ -1049,29 +1043,29 @@ class buy_adjust(models.Model):
         当新增产品时，则更新原单据及入库单分单明细行。
         '''
         if self.state == 'done':
-            raise except_orm(u'错误', u'请不要重复审核！')
+            raise UserError(u'请不要重复审核！')
         if not self.line_ids:
-            raise except_orm(u'错误', u'请输入产品明细行！')
+            raise UserError(u'请输入产品明细行！')
         for line in self.line_ids:
             if  line.price_taxed < 0:
-                raise except_orm(u'错误', u'产品含税单价不能小于0！')
+                raise UserError(u'产品含税单价不能小于0！')
         buy_receipt = self.env['buy.receipt'].search(
                     [('order_id', '=', self.order_id.id),
                      ('state', '=', 'draft')])
         if not buy_receipt:
-            raise except_orm(u'错误', u'采购入库单已全部入库，不能调整')
+            raise UserError(u'采购入库单已全部入库，不能调整')
         for line in self.line_ids:
             origin_line = self.env['buy.order.line'].search(
                         [('goods_id', '=', line.goods_id.id),
                          ('attribute_id', '=', line.attribute_id.id),
                          ('order_id', '=', self.order_id.id)])
             if len(origin_line) > 1:
-                raise except_orm(u'错误', u'要调整的商品%s在原始单据中不唯一' % line.goods_id.name)
+                raise UserError(u'要调整的商品%s在原始单据中不唯一' % line.goods_id.name)
             if origin_line:
                 origin_line.quantity += line.quantity # 调整后数量
                 origin_line.note = line.note
                 if origin_line.quantity < origin_line.quantity_in:
-                    raise except_orm(u'错误', u'%s调整后数量不能小于原订单已入库数量' % line.goods_id.name)
+                    raise UserError(u'%s调整后数量不能小于原订单已入库数量' % line.goods_id.name)
                 elif origin_line.quantity > origin_line.quantity_in:
                     # 查找出原购货订单产生的草稿状态的入库单明细行，并更新它
                     move_line = self.env['wh.move.line'].search(
@@ -1082,7 +1076,7 @@ class buy_adjust(models.Model):
                         move_line.goods_uos_qty = move_line.goods_qty / move_line.goods_id.conversion
                         move_line.note = line.note
                     else:
-                        raise except_orm(u'错误', u'商品%s已全部入库，建议新建购货订单' % line.goods_id.name)
+                        raise UserError(u'商品%s已全部入库，建议新建购货订单' % line.goods_id.name)
                 # 调整后数量与已入库数量相等时，删除产生的入库单分单
                 else:
                     buy_receipt.unlink()
@@ -1109,7 +1103,7 @@ class buy_adjust(models.Model):
                                     self.order_id.get_receipt_line(new_line, single=True))
                 else:
                     receipt_line.append(self.order_id.get_receipt_line(new_line, single=False))
-                buy_receipt.line_in_ids = [(0, 0, li[0]) for li in receipt_line]
+                buy_receipt.write({'line_in_ids': [(0, 0, li[0]) for li in receipt_line]})
         self.state = 'done'
         self.approve_uid = self._uid
 
@@ -1178,17 +1172,15 @@ class buy_adjust_line(models.Model):
     note = fields.Char(u'备注',
                        help=u'本行备注')
 
-    @api.one
     @api.onchange('goods_id')
     def onchange_goods_id(self):
         '''当订单行的产品变化时，带出产品上的单位、默认仓库、成本价'''
         if self.goods_id:
             self.uom_id = self.goods_id.uom_id
             if not self.goods_id.cost:
-                raise except_orm(u'错误', u'请先设置商品的成本！')
+                raise UserError(u'请先设置商品的成本！')
             self.price_taxed = self.goods_id.cost
 
-    @api.one
     @api.onchange('quantity', 'price_taxed', 'discount_rate')
     def onchange_discount_rate(self):
         '''当数量、单价或优惠率发生变化时，优惠金额发生变化'''

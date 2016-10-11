@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 
-from openerp.osv import osv
-import openerp.addons.decimal_precision as dp
+from odoo.osv import osv
+import odoo.addons.decimal_precision as dp
 from utils import safe_division
 from jinja2 import Environment, PackageLoader
-from openerp import models, fields, api
+from odoo import models, fields, api
+from odoo.exceptions import UserError
 
-env = Environment(loader=PackageLoader('openerp.addons.warehouse', 'html'), autoescape=True)
+env = Environment(loader=PackageLoader('odoo.addons.warehouse', 'html'), autoescape=True)
 
 
 class wh_move_line(models.Model):
@@ -218,7 +219,7 @@ class wh_move_line(models.Model):
 
     def check_availability(self):
         if self.warehouse_dest_id == self.warehouse_id:
-            raise osv.except_osv(u'错误', u'调出仓库不可以和调入仓库一样')
+            raise UserError(u'调出仓库不可以和调入仓库一样')
 
     def prev_action_done(self):
         pass
@@ -315,19 +316,16 @@ class wh_move_line(models.Model):
         self.compute_suggested_cost()
         return {'domain': {'lot_id': self.compute_lot_domain()}}
 
-    @api.one
     @api.onchange('goods_qty')
     def onchange_goods_qty(self):
         self.compute_suggested_cost()
 
-    @api.one
     @api.onchange('goods_uos_qty')
     def onchange_goods_uos_qty(self):
         if self.goods_id:
             self.goods_qty = self.goods_id.conversion_unit(self.goods_uos_qty)
         self.compute_suggested_cost()
 
-    @api.one
     @api.onchange('lot_id')
     def onchange_lot_id(self):
         if self.lot_id:
@@ -337,7 +335,6 @@ class wh_move_line(models.Model):
             if self.env.context.get('type') == 'internal':
                 self.lot = self.lot_id.lot
 
-    @api.one
     @api.onchange('goods_qty', 'price_taxed', 'discount_rate')
     def onchange_discount_rate(self):
         '''当数量、单价或优惠率发生变化时，优惠金额发生变化'''
@@ -348,6 +345,6 @@ class wh_move_line(models.Model):
     def unlink(self):
         for line in self:
             if line.state == 'done':
-                raise osv.except_osv(u'错误', u'不可以删除已经完成的明细')
+                raise UserError(u'不可以删除已经完成的明细')
 
         return super(wh_move_line, self).unlink()

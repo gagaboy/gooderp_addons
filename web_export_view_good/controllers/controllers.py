@@ -25,17 +25,17 @@ try:
 except ImportError:
     import simplejson as json
 import time
-import openerp.http as http
-from openerp.http import request
-from openerp.addons.web.controllers.main import ExcelExport
-from openerp import models, fields, api
+import odoo.http as http
+from odoo.http import request
+from odoo.addons.web.controllers.main import ExcelExport
+from odoo import models, fields, api
 import xlwt
 import xlrd
 import datetime
 import StringIO
 import re
 import xlutils.copy
-from openerp.tools import misc
+from odoo.tools import misc
 
 
 class ReportTemplate(models.Model):
@@ -44,7 +44,6 @@ class ReportTemplate(models.Model):
     file_address = fields.Char(u'模板文件路径')
     active = fields.Boolean(u'可用', default=True)
 
-    @api.one
     @api.onchange('model_id')
     def _compute_model_name(self):
         if self.model_id:

@@ -10,7 +10,7 @@
     'depends': ['base',
                 'web_menu_create',
                 'decimal_precision',
-                'web_readonly_bypass',
+#                'web_readonly_bypass',
                 'web_export_view_good','home_page'],
     'demo': [
         'core_demo.xml',
@@ -21,4 +21,7 @@
         'core_view.xml',
         'security/ir.model.access.csv',
         ],
+    'qweb': [
+        'static/src/xml/*.xml',
+    ],
 }
