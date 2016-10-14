@@ -59,7 +59,7 @@ class money_order(models.Model):
                 vouch_debit_line = self.env['voucher.line'].create({
                     'name': u"收款单%s" % (name),
                     'account_id': line.bank_id.account_id.id,
-                    'debit': line.amount,
+                    'debit': line.amount * (line.currency_id.rate or 1),
                     'voucher_id': vouch_obj.id,
                     'partner_id': '',
                 })
@@ -80,18 +80,6 @@ class money_order(models.Model):
                                             'currency_amount': line.amount,
                                             'rate_silent': line.currency_id.rate
                                             })
-                # # 折扣行生成凭证
-                # if self.discount_amount != 0 and first_line_flag:
-                #     first_line_flag = False
-                #     self.env['voucher.line'].create({
-                #         'name': u"%s收款单%s 折扣" % (partner.name, name),
-                #         'account_id': self.discount_account_id.id,
-                #         'debit': self.discount_amount,
-                #         'voucher_id': vouch_obj.id,
-                #         'partner_id': self.partner_id.id,
-                #     })
-                #
-                #     vouch_debit_line.debit += self.discount_amount
 
         if source_ids:
             for line in line_ids:
@@ -253,13 +241,13 @@ class money_invoice(models.Model):
         if not partner_account_id:
             raise UserError(u'请配置%s的会计科目' % (partner_cat.name))
         if self.category_id.type == 'income':
-            vals.update({'vouch_obj_id': vouch_obj.id, 'partner_credit': self.partner_id.id, 'name': self.name, 'string': u'源单',
+            vals.update({'vouch_obj_id': vouch_obj.id, 'partner_credit': self.partner_id.id, 'name': self.name, 'string': u'结算单',
                          'amount': self.amount, 'credit_account_id': self.category_id.account_id.id, 'partner_debit': self.partner_id.id,
                          'debit_account_id': partner_account_id, 'sell_tax_amount': self.tax_amount or 0,
                          'credit_auxiliary_id':self.auxiliary_id.id,'currency_id':self.currency_id.id or '','rate_silent':self.currency_id.rate or 0,
                          })
         else:
-            vals.update({'vouch_obj_id': vouch_obj.id, 'name': self.name, 'string': u'源单',
+            vals.update({'vouch_obj_id': vouch_obj.id, 'name': self.name, 'string': u'结算单',
                          'amount': self.amount, 'credit_account_id': partner_account_id,
                          'debit_account_id': self.category_id.account_id.id, 'partner_debit': self.partner_id.id,
                          'partner_credit':self.partner_id.id, 'buy_tax_amount': self.tax_amount or 0,
