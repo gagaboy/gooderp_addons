@@ -1,9 +1,7 @@
 # -*- coding: utf-8 -*-
-
 from datetime import date
 from odoo import models, fields, api
 from odoo.exceptions import UserError
-
 
 class checkout_wizard(models.TransientModel):
     '''月末结账的向导'''
@@ -25,7 +23,7 @@ class checkout_wizard(models.TransientModel):
                 if not last_period.is_closed:
                     raise UserError(u'上一个期间%s未结账' % last_period.name)
             if self.period_id.is_closed:
-                raise UserError(u'本期间已结账')
+                raise UserError(u'本期间%s已结账' % self.period_id.name)
             else:
                 voucher_obj = self.env['voucher']
                 voucher_ids = voucher_obj.search([('period_id', '=', self.period_id.id)])
@@ -50,7 +48,7 @@ class checkout_wizard(models.TransientModel):
                             ('voucher_id.period_id', '=', self.period_id.id)])
                         credit_total = 0
                         for voucher_line_id in voucher_line_ids:
-                            credit_total += voucher_line_id.credit
+                            credit_total += voucher_line_id.credit - voucher_line_id.debit
                         revenue_total += credit_total
                         if credit_total != 0:
                             res = {
@@ -66,7 +64,7 @@ class checkout_wizard(models.TransientModel):
                             ('voucher_id.period_id', '=', self.period_id.id)])
                         debit_total = 0
                         for voucher_line_id in voucher_line_ids:
-                            debit_total += voucher_line_id.debit
+                            debit_total += voucher_line_id.debit - voucher_line_id.credit
                         expense_total += debit_total
                         if debit_total != 0:
                             res = {
@@ -113,7 +111,7 @@ class checkout_wizard(models.TransientModel):
                 if self.period_id.month == '12':
                     year_profit_ids = voucher_line_obj.search([
                         ('account_id', '=', year_profit_account.id),
-                        ('voucher_id.period_id', '=', self.period_id.id)])
+                        ('voucher_id.period_id.year', '=', self.period_id.year)])
                     year_total = 0
                     for year_profit_id in year_profit_ids:
                         year_total += (year_profit_id.credit - year_profit_id.debit)
@@ -179,7 +177,7 @@ class checkout_wizard(models.TransientModel):
     def button_counter_checkout(self):
         if self.period_id:
             if not self.period_id.is_closed:
-                raise UserError(u'本期间未结账')
+                raise UserError(u'期间%s未结账'%self.period_id.name)
             else:
                 next_period = self.env['create.trial.balance.wizard'].compute_next_period_id(self.period_id)
                 if next_period:
@@ -217,7 +215,7 @@ class checkout_wizard(models.TransientModel):
             seq_id = preferred_sequences[0] if preferred_sequences else seq_ids[0]
             voucher_obj = self.env['voucher']
             # 按年重置
-            last_period = self.env['create.trial.balance.wizard'].compute_last_period_id(self.period_id)
+            last_period = self.env['create.trial.balance.wizard'].compute_last_period_id(period_id)
             last_voucher_number = 0
             if reset_period == 'year':
                 if last_period:
@@ -239,36 +237,20 @@ class checkout_wizard(models.TransientModel):
                             last_period = self.env['create.trial.balance.wizard'].compute_last_period_id(last_period)
                 else:
                     last_voucher_number = reset_init_number
-                # 产生凭证号前后缀
-                d = self.env['ir.sequence']._interpolation_dict_context(context=self._context)
-                try:
-                    interpolated_prefix = self.env['ir.sequence']._interpolate(seq_id.prefix, d)
-                    interpolated_suffix = self.env['ir.sequence']._interpolate(seq_id.suffix, d)
-                except ValueError:
-                    raise UserError(_(u'警告'),
-                                     _(u'无效的前缀或后缀 \'%s\'') % (seq_id.name))
                 voucher_ids = voucher_obj.search([('period_id', '=', period_id.id)], order='create_date')
                 for voucher_id in voucher_ids:
                     # 产生凭证号
-                    next_voucher_name = interpolated_prefix + '%%0%sd' % seq_id.padding % last_voucher_number + interpolated_suffix
+                    next_voucher_name = '%%0%sd' % seq_id.padding % last_voucher_number
                     last_voucher_number += 1
                     # 更新凭证号
                     voucher_id.with_context(context).write({'name': next_voucher_name})
             # 按月重置
             else:
                 last_voucher_number = reset_init_number
-                # 产生凭证号前后缀
-                d = self.env['ir.sequence']._interpolation_dict_context(context=self._context)
-                try:
-                    interpolated_prefix = self.env['ir.sequence']._interpolate(seq_id.prefix, d)
-                    interpolated_suffix = self.env['ir.sequence']._interpolate(seq_id.suffix, d)
-                except ValueError:
-                    raise UserError(_(u'警告'),
-                                     _(u'无效的前缀或后缀 \'%s\'') % (seq_id.name))
                 voucher_ids = voucher_obj.search([('period_id', '=', period_id.id)], order='create_date')
                 for voucher_id in voucher_ids:
                     # 产生凭证号
-                    next_voucher_name = interpolated_prefix + '%%0%sd' % seq_id.padding % last_voucher_number + interpolated_suffix
+                    next_voucher_name = '%%0%sd' % seq_id.padding % last_voucher_number
                     # 更新凭证号,将老号写到变化表中去！
                     if voucher_id.name != next_voucher_name:
                         self.env['chang.voucher.name'].create({
@@ -278,12 +260,3 @@ class checkout_wizard(models.TransientModel):
                         })
                     voucher_id.with_context(context).write({'name': next_voucher_name})
                     last_voucher_number += 1
-            # update ir.sequence  number_next
-            if last_voucher_number:
-                self.env.cr.execute("UPDATE ir_sequence SET suffix=%s WHERE id=%s ",
-                                    (seq_id.suffix or interpolated_suffix, seq_id.id))
-                self.env['ir.sequence']._alter_sequence(seq_id.id, seq_id.number_increment,
-                                                        seq_id.number_next)
-                self.env.cr.commit()
-
-

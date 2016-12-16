@@ -21,6 +21,7 @@
 from odoo.exceptions import UserError
 import odoo.addons.decimal_precision as dp
 from odoo import fields, models, api
+from odoo.tools import float_compare
 
 
 class money_transfer_order(models.Model):
@@ -38,7 +39,7 @@ class money_transfer_order(models.Model):
     def unlink(self):
         for order in self:
             if order.state == 'done':
-                raise UserError(u'不可以删除已经审核的单据')
+                raise UserError(u'不可以删除已经审核的单据\n 资金转账单%s已审核'%order.name)
 
         return super(money_transfer_order, self).unlink()
 
@@ -71,52 +72,72 @@ class money_transfer_order(models.Model):
     @api.multi
     def money_transfer_done(self):
         '''转账单的审核按钮'''
-        for transfer in self:
-            if not transfer.line_ids:
-                raise UserError('请先输入转账金额')
-            for line in transfer.line_ids:
-                company_currency_id = self.env.user.company_id.currency_id.id
-                out_currency_id = line.out_bank_id.account_id.currency_id.id or company_currency_id
-                in_currency_id = line.in_bank_id.account_id.currency_id.id or company_currency_id
+        self.ensure_one()
+        if not self.line_ids:
+            raise UserError('请先输入转账金额')
+        for line in self.line_ids:
+            company_currency_id = self.env.user.company_id.currency_id.id
+            out_currency_id = line.out_bank_id.account_id.currency_id.id or company_currency_id
+            in_currency_id = line.in_bank_id.account_id.currency_id.id or company_currency_id
 
-                if line.out_bank_id == line.in_bank_id :
-                    raise UserError('转出账户与转入账户不能相同')
-                if line.amount < 0:
-                    raise UserError('转账金额必须大于0')
-                if line.amount == 0:
-                    raise UserError('转账金额不能为0')
-                if out_currency_id == company_currency_id :
-                    if line.out_bank_id.balance < line.amount:
-                        raise UserError('转出账户余额不足')
-                    else:
-                        line.out_bank_id.balance -= line.amount
-                    if in_currency_id == company_currency_id :
-                        line.in_bank_id.balance += line.amount
-                    else:
-                        line.in_bank_id.balance += line.currency_amount
-                if out_currency_id != company_currency_id :
-                    if line.out_bank_id.balance < line.currency_amount:
-                        raise UserError('转出账户余额不足')
-                    if in_currency_id == company_currency_id:
-                        line.in_bank_id.balance += line.amount
-                        line.out_bank_id.balance -= line.currency_amount
-                    else:
-                        raise UserError('系统不支持外币转外币')
+            if line.out_bank_id == line.in_bank_id :
+                raise UserError('转出账户与转入账户不能相同')
+            if line.amount < 0:
+                raise UserError('转账金额必须大于0!\n 转账金额:%s'%line.amount)
+            if line.amount == 0:
+                raise UserError('转账金额不能为0')
+            if out_currency_id == company_currency_id :
+                if line.out_bank_id.balance < line.amount:
+                    raise UserError('转出账户余额不足!\n转出账户余额:%s 本次转出余额:%s'%(line.out_bank_id.balance, line.amount))
+                else:
+                    line.out_bank_id.balance -= line.amount
+                if in_currency_id == company_currency_id :
+                    line.in_bank_id.balance += line.amount
+                else:
+                    line.in_bank_id.balance += line.currency_amount
+            else:
+                decimal_amount = self.env.ref('core.decimal_amount')
+                if float_compare(line.out_bank_id.balance, line.currency_amount, precision_digits=decimal_amount.digits) == -1:
+                    raise UserError('转出账户余额不足!\n转出账户余额:%s 本次转出余额:%s'
+                                    % (line.out_bank_id.balance, line.currency_amount))
+                if in_currency_id == company_currency_id:
+                    line.in_bank_id.balance += line.amount
+                    line.out_bank_id.balance -= line.currency_amount
+                else:
+                    raise UserError('系统不支持外币转外币')
 
-            transfer.state = 'done'
+            self.state = 'done'
         return True
 
     @api.multi
     def money_transfer_draft(self):
-        '''转账单的反审核按钮'''
-        for transfer in self:
-            for line in transfer.line_ids:
-                if line.in_bank_id.balance < line.amount:
-                    raise UserError('转入账户余额不足')
+        '''转账单的反审核按钮,外币要考虑是转入还是转出'''
+        self.ensure_one()
+        decimal_amount = self.env.ref('core.decimal_amount')
+        for line in self.line_ids:
+            if line.currency_amount >0 :
+                if line.in_bank_id.currency_id:
+                    if float_compare(line.in_bank_id.balance, line.currency_amount, precision_digits=decimal_amount.digits) == -1:
+                        raise UserError('转入账户余额不足!\n转入账户余额:%s 本次转出余额:%s'
+                                % (line.in_bank_id.balance, line.currency_amount))
+                    else:
+                        line.in_bank_id.balance -= line.currency_amount
+                        line.out_bank_id.balance += line.amount
+                else:
+                    if float_compare(line.in_bank_id.balance, line.amount, precision_digits=decimal_amount.digits) == -1:
+                        raise UserError('转入账户余额不足!\n转入账户余额:%s 本次转出余额:%s'
+                                % (line.in_bank_id.balance, line.amount))
+                    else:
+                        line.in_bank_id.balance -= line.amount
+                        line.out_bank_id.balance += line.currency_amount
+            else:
+                if float_compare(line.in_bank_id.balance, line.amount, precision_digits=decimal_amount.digits) == -1:
+                    raise UserError('转入账户余额不足!\n转入账户余额:%s 本次转出余额:%s'
+                                % (line.in_bank_id.balance, line.amount))
                 else:
                     line.in_bank_id.balance -= line.amount
                     line.out_bank_id.balance += line.amount
-            transfer.state = 'draft'
+        self.state = 'draft'
         return True
 
 

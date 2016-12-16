@@ -65,17 +65,16 @@ class partner_address(models.Model):
                     if self.county_id:
                         if self.county_id.city_id.id == self.city_id.id:
                             return{}
-                    self.county_id = ''
-                    return {'domain': domain_dict}
+                    else:
+                        self.county_id = ''
                 else:
                     self.city_id = ''
-                    return {'domain': domain_dict}
-            else:
-                return {'domain': domain_dict}
         else:
             self.city_id = ''
             self.county_id = ''
-            return {'domain': {'city_id': [], 'county_id': []}}
+            domain_dict = {'city_id': [], 'county_id': []}
+
+        return {'domain': domain_dict}
 
     @api.onchange('city_id')
     def onchange_city(self):
@@ -85,37 +84,31 @@ class partner_address(models.Model):
             province = self.city_id.province_id
             if not self.province_id:
                 if self.county_id:
-                    if self.county_id.city_id.id == self.city_id.id:
-                        return {'domain': domain_dict}
-                    self.city_id = ''
+                    if self.county_id.city_id.id != self.city_id.id:
+                        self.city_id = ''
+                        self.province_id = province.id
+                else:
                     self.province_id = province.id
-                    return {'domain': domain_dict}
-                self.province_id = province.id
-                return {'domain': domain_dict}
             else:
                 domain_dict.update({'city_id': [('province_id', '=', province.id)]})
                 if self.county_id:
                     if self.county_id.city_id.id == self.city_id.id:
                         if province.id != self.province_id.id:
                             self.province_id = province.id
-                            return {'domain': domain_dict}
-                        return {'domain': domain_dict}
                     else:
                         if province.id != self.province_id.id:
                             self.province_id = province.id
                             self.county_id = ''
-                            return {'domain': domain_dict}
-                        self.county_id = ''
-                        return {'domain': domain_dict}
+                        else:
+                            self.county_id = ''
                 else:
                     if province.id != self.province_id.id:
                         self.province_id = province.id
-                        return {'domain': domain_dict}
-                    return {'domain': domain_dict}
         else:
             self.county_id = ''
-            return {'domain': {'county_id': []}}
+            domain_dict = {'county_id': []}
 
+        return {'domain': domain_dict}
 
     @api.onchange('county_id')
     def onchange_county(self):
@@ -131,7 +124,7 @@ class partner(models.Model):
     _description = u'业务伙伴'
 
     @api.one
-    @api.depends('child_ids.is_default_add')
+    @api.depends('child_ids.is_default_add', 'child_ids.province_id', 'child_ids.city_id', 'child_ids.county_id', 'child_ids.town', 'child_ids.detail_address')
     def _compute_partner_address(self):
         '''如果业务伙伴地址中有默认地址，则显示在业务伙伴列表上'''
         if not self.child_ids:
@@ -142,11 +135,11 @@ class partner(models.Model):
                 self.mobile = child.mobile
                 self.phone = child.phone
                 self.qq = child.qq
-                address = '%s%s%s%s%s' % (child.province_id.name,
-                           child.city_id.city_name,
-                           child.county_id.county_name,
-                           child.town,
-                           child.detail_address)
+                address = '%s%s%s%s%s' % (child.province_id and child.province_id.name or '',
+                           child.city_id and child.city_id.city_name or '',
+                           child.county_id and child.county_id.county_name or '',
+                           child.town or '',
+                           child.detail_address or '')
                 self.address = address
 
     child_ids = fields.One2many('partner.address', 'partner_id', u'业务伙伴地址')

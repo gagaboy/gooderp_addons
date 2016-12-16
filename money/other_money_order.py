@@ -34,9 +34,9 @@ class other_money_order(models.Model):
     @api.model
     def create(self, values):
         # 创建单据时，更新订单类型的不同，生成不同的单据编号
-        if self._context.get('type') == 'other_get':
+        if self.env.context.get('type') == 'other_get':
             values.update({'name': self.env['ir.sequence'].next_by_code('other.get.order') or '/'})
-        if self._context.get('type') == 'other_pay' or values.get('name', '/') == '/':
+        if self.env.context.get('type') == 'other_pay' or values.get('name', '/') == '/':
             values.update({'name': self.env['ir.sequence'].next_by_code('other.pay.order') or '/'})
 
         return super(other_money_order, self).create(values)
@@ -45,7 +45,7 @@ class other_money_order(models.Model):
     def unlink(self):
         for order in self:
             if order.state == 'done':
-                raise UserError(u'不可以删除已经审核的单据')
+                raise UserError(u'不可以删除已经审核的单据(%s)'%order.name)
 
         return super(other_money_order, self).unlink()
 
@@ -102,32 +102,32 @@ class other_money_order(models.Model):
     @api.multi
     def other_money_done(self):
         '''其他收支单的审核按钮'''
-        for other in self:
-            if other.total_amount <= 0:
-                raise UserError(u'金额应该大于0')
+        self.ensure_one()
+        if self.total_amount <= 0:
+            raise UserError(u'金额应该大于0!\n金额:%s'%self.total_amount)
 
-            # 根据单据类型更新账户余额
-            if other.type == 'other_pay':
-                if other.bank_id.balance < other.total_amount:
-                    raise UserError(u'账户余额不足')
-                other.bank_id.balance -= other.total_amount
-            else:
-                other.bank_id.balance += other.total_amount
-            other.state = 'done'
+        # 根据单据类型更新账户余额
+        if self.type == 'other_pay':
+            if self.bank_id.balance < self.total_amount:
+                raise UserError(u'账户余额不足!\n账户余额:%s 本次支出金额:%s' % (self.bank_id.balance, self.total_amount))
+            self.bank_id.balance -= self.total_amount
+        else:
+            self.bank_id.balance += self.total_amount
+        self.state = 'done'
         return True
 
     @api.multi
     def other_money_draft(self):
         '''其他收支单的反审核按钮'''
-        for other in self:
-            # 根据单据类型更新账户余额
-            if other.type == 'other_pay':
-                other.bank_id.balance += other.total_amount
-            else:
-                if other.bank_id.balance < other.total_amount:
-                    raise UserError(u'账户余额不足')
-                other.bank_id.balance -= other.total_amount
-            other.state = 'draft'
+        self.ensure_one()
+        # 根据单据类型更新账户余额
+        if self.type == 'other_pay':
+            self.bank_id.balance += self.total_amount
+        else:
+            if self.bank_id.balance < self.total_amount:
+                raise UserError(u'账户余额不足!\n账户余额:%s 本次支出金额:%s' % (self.bank_id.balance, self.total_amount))
+            self.bank_id.balance -= self.total_amount
+        self.state = 'draft'
         return True
 
 #     @api.multi

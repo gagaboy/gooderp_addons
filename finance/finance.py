@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
-
 import calendar
 from datetime import datetime
-
 import odoo.addons.decimal_precision as dp
 from odoo import api, fields, models
 from odoo.exceptions import UserError, ValidationError
@@ -38,6 +36,10 @@ class voucher(models.Model):
 
     @api.model
     def _default_voucher_date(self):
+        return self._default_voucher_date_impl()
+    @api.model
+    def _default_voucher_date_impl(self):
+        ''' 获得默认的凭证创建日期 '''
         voucher_setting = self.env['ir.values'].get_default('finance.config.settings', 'default_voucher_date')
         now_date = fields.Date.context_today(self)
         if voucher_setting == 'last' and self.search([], limit=1):
@@ -56,14 +58,14 @@ class voucher(models.Model):
         default=lambda self: self.env.ref('finance.document_word_1'), help=u'“收款凭证”，凭证字就是“收”\n“付款凭证”，凭证字就是“付”\
         “转帐凭证”，凭证字就是“转”\n“记款凭证”，凭证字就是“记” (可以不用以上三种凭证字，就用记字也可以)')
     date = fields.Date(u'凭证日期', required=True, default=_default_voucher_date,
-                       track_visibility='always', help=u'本张凭证创建的时间！')
-    name = fields.Char(u'凭证号', track_visibility='always')
+                       track_visibility='always', help=u'本张凭证创建的时间！', copy=False)
+    name = fields.Char(u'凭证号', track_visibility='always', copy=False)
     att_count = fields.Integer(u'附单据', default=1, help='原始凭证的张数！')
     period_id = fields.Many2one(
         'finance.period',
         u'会计期间',
         compute='_compute_period_id', ondelete='restrict', store=True, help=u'本张凭证发生日期对应的，会计期间！')
-    line_ids = fields.One2many('voucher.line', 'voucher_id', u'凭证明细')
+    line_ids = fields.One2many('voucher.line', 'voucher_id', u'凭证明细', copy=True)
     amount_text = fields.Float(u'总计', compute='_compute_amount', store=True,
                                track_visibility='always',help=u'凭证金额')
     state = fields.Selection([('draft', u'草稿'),
@@ -80,31 +82,32 @@ class voucher(models.Model):
         """
         if self.state == 'done':
             raise UserError(u'请不要重复审核！')
-        if self.period_id.is_closed is True:
+        if self.period_id.is_closed:
             raise UserError(u'该会计期间已结账！不能审核')
         if not self.line_ids:
             raise ValidationError(u'请输入凭证行')
         for line in self.line_ids:
             if line.debit + line.credit == 0:
-                raise ValidationError(u'单行凭证行借和贷不能同时为0')
+                raise ValidationError(u'单行凭证行借和贷不能同时为0\n 借方金额为: %s 贷方金额为:%s' % (line.debit, line.credit))
             if line.debit * line.credit != 0:
-                raise ValidationError(u'单行凭证行不能同时输入借和贷')
+                raise ValidationError(u'单行凭证行不能同时输入借和贷\n 摘要为%s的凭证行 借方为:%s 贷方为:%s' %
+                                      (line.name, line.debit, line.credit))
         debit_sum = sum([line.debit for line in self.line_ids])
         credit_sum = sum([line.credit for line in self.line_ids])
         precision = self.env['decimal.precision'].precision_get('Account')
         debit_sum = round(debit_sum, precision)
         credit_sum = round(credit_sum, precision)
         if debit_sum != credit_sum:
-            raise ValidationError(u'借贷方不平')
+            raise ValidationError(u'借贷方不平!\n 借方合计:%s 贷方合计:%s' % (debit_sum, credit_sum))
 
         self.state = 'done'
 
     @api.one
     def voucher_draft(self):
         if self.state == 'draft':
-            raise UserError(u'请不要重复反审核！')
-        if self.period_id.is_closed is True:
-            raise UserError(u'该会计期间已结账！不能反审核')
+            raise UserError(u'凭证%s已经审核,请不要重复反审核！' % self.name)
+        if self.period_id.is_closed:
+            raise UserError(u'%s期 会计期间已结账！不能反审核' % self.period_id.name)
         self.state = 'draft'
 
     @api.one
@@ -117,7 +120,7 @@ class voucher(models.Model):
     def unlink(self):
         for active_voucher in self:
             if active_voucher.state == 'done':
-                raise UserError(u'不能删除已审核的凭证')
+                raise UserError(u'凭证%s已审核,不能删除已审核的凭证'%active_voucher.name)
         return super(voucher, self).unlink()
 
     # 重载write 方法
@@ -126,12 +129,12 @@ class voucher(models.Model):
         if self.env.context.get('call_module', False) == "checkout_wizard":
             return super(voucher, self).write(vals)
         if self.period_id.is_closed is True:
-            raise UserError(u'该会计期间已结账，凭证不能再修改！')
+            raise UserError(u'%s期 会计期间已结账，凭证不能再修改！'%self.period_id.name)
         if len(vals) == 1 and vals.get('state', False):  # 审核or反审核
             return super(voucher, self).write(vals)
         else:
             if self.state == 'done':
-                raise UserError(u'凭证已审核！修改请先反审核！')
+                raise UserError(u'凭证%s已审核！修改请先反审核！'%self.name)
         return super(voucher, self).write(vals)
 
 class voucher_line(models.Model):
@@ -144,7 +147,7 @@ class voucher_line(models.Model):
         move_obj = self.env['voucher']
         total = 0.0
         context= self._context
-        if  context.get('line_ids'):
+        if context.get('line_ids'):
             for move_line_dict in move_obj.resolve_2many_commands('line_ids', context.get('line_ids')):
                 data['name'] = data.get('name') or move_line_dict.get('name')
                 total += move_line_dict.get('debit', 0.0) - move_line_dict.get('credit', 0.0)
@@ -175,7 +178,7 @@ class voucher_line(models.Model):
     currency_amount = fields.Float(u'外币金额', digits=dp.get_precision(u'金额'))
     currency_id = fields.Many2one('res.currency', u'外币币别', ondelete='restrict')
     rate_silent = fields.Float(u'汇率')
-
+    period_id = fields.Many2one(related='voucher_id.period_id', relation='finance.period', string='凭证期间', store=True)
     goods_id = fields.Many2one('goods', u'商品', ondelete='restrict')
     auxiliary_id = fields.Many2one(
         'auxiliary.financing', u'辅助核算',help='辅助核算是对账务处理的一种补充,即实现更广泛的账务处理,\
@@ -205,9 +208,7 @@ class voucher_line(models.Model):
                 'partner_id': [('name', '=', False)],
                 'goods_id': [('name', '=', False)],
                 'auxiliary_id': [('name', '=', False)]}}
-        if not self.account_id:
-            return res
-        if not self.account_id.auxiliary_financing:
+        if not self.account_id or not self.account_id.auxiliary_financing:
             return res
         if self.account_id.auxiliary_financing == 'partner':
             res['domain']['partner_id'] = [('c_category_id', '!=', False)]
@@ -224,7 +225,8 @@ class voucher_line(models.Model):
     def unlink(self):
         for active_voucher_line in self:
             if active_voucher_line.voucher_id.state == 'done':
-                raise UserError(u'不能删除已审核的凭证行')
+                raise UserError(u'不能删除已审核的凭证行\n 所属凭证%s  凭证行摘要%s'
+                                %(active_voucher_line.voucher_id.name,active_voucher_line.name))
         return super(voucher_line, self).unlink()
 
 
@@ -242,8 +244,29 @@ class finance_period(models.Model):
     @api.one
     @api.depends('year', 'month')
     def _compute_name(self):
+        """
+        根据填写的月份年份 设定期间的name值
+        :return: None
+        """
         if self.year and self.month:
             self.name = u'%s年 第%s期' % (self.year, self.month)
+
+    @api.multi
+    def period_compare(self,period_id_one,period_id_two):
+        """
+        比较期间的大小
+        :param period_id_one: 要比较的期间 1
+        :param period_id_two:要比较的期间 2
+        :return: 1 0 -1 分别代表 期间1 大于 等于 小于 期间2
+        """
+        period_one_str = "%s-%s"%(period_id_one.year,str(period_id_one.month).zfill(2))
+        period_two_str = "%s-%s"%(period_id_two.year,str(period_id_two.month).zfill(2))
+        if period_one_str > period_two_str:
+            return 1
+        elif period_one_str < period_two_str:
+            return -1
+        else:
+            return 0
 
     @api.model
     def init_period(self):
@@ -270,6 +293,11 @@ class finance_period(models.Model):
 
     @api.multi
     def get_period_month_date_range(self, period_id):
+        """
+        取得 period_id 期间的第一天 和最后一天
+        :param period_id: 要取得一个月 最后一天和第一天的期间
+        :return: 返回一个月的第一天和最后一天 （'2016-01-01','2016-01-31'）
+        """
         month_day_range = calendar.monthrange(int(period_id.year), int(period_id.month))
         return ("%s-%s-01" % (period_id.year, period_id.month), "%s-%s-%s" % (period_id.year, period_id.month, str(month_day_range[1])))
 
@@ -285,12 +313,17 @@ class finance_period(models.Model):
             [('year', '=', datetime_str_list[0])])
         period_list = sorted(map(int, [period.month for period in period_row]))
         if not period_row[0]:
-            raise UserError(u'会计期间不存在！')
+            raise UserError(u'日期%s所在会计期间不存在！'%datetime_str)
         fist_period = self.search([('year', '=', datetime_str_list[0]), ('month', '=', period_list[0])], order='name')
         return fist_period
 
     @api.multi
     def get_period(self, date):
+        """
+        根据参数date 得出对应的期间
+        :param date: 需要取得期间的时间
+        :return: 对应的期间
+        """
         if date:
             period_id = self.search([
                 ('year', '=', date[0:4]),
@@ -298,11 +331,10 @@ class finance_period(models.Model):
             ])
             if period_id:
                 if period_id.is_closed and self._context.get('module_name', False) != 'checkout_wizard':
-                    raise UserError(u'此会计期间已关闭')
-                else:
-                    return period_id
+                    raise UserError(u'会计期间%s已关闭' % period_id.name)
             else:
-                raise UserError(u'此日期对应的会计期间不存在')
+                raise UserError(u'%s 对应的会计期间不存在'%date)
+            return period_id
 
     _sql_constraints = [
         ('period_uniq', 'unique (year,month)', u'会计区间不能重复'),
@@ -351,6 +383,10 @@ class finance_account(models.Model):
     @api.multi
     @api.depends('name', 'code')
     def name_get(self):
+        """
+        在其他model中用到account时在页面显示 code name 如：2202 应付账款 （更有利于会计记账）
+        :return:
+        """
         result = []
         for line in self:
             account_name = line.code + ' ' + line.name
@@ -369,12 +405,20 @@ class finance_account(models.Model):
 
     @api.multi
     def get_smallest_code_account(self):
+        """
+        取得最小的code对应的account对象
+        :return: 最小的code 对应的对象
+        """
         finance_account_row = self.search([],order='code')
         return finance_account_row and finance_account_row[0]
 
 
     @api.multi
     def get_max_code_account(self):
+        """
+        取得最大的code对应的account对象
+        :return: 最大的code 对应的对象
+        """
         finance_account_row = self.search([],order='code desc')
         return finance_account_row and finance_account_row[0]
 
@@ -389,7 +433,11 @@ class auxiliary_financing(models.Model):
         ('member', u'个人'),
         ('project', u'项目'),
         ('department', u'部门'),
-    ], u'分类')
+    ], u'分类', default=lambda self: self.env.context.get('type'))
+
+    _sql_constraints = [
+        ('name_uniq', 'unique(name)', '辅助核算不能重名')
+    ]
 
 
 class res_company(models.Model):
@@ -402,6 +450,8 @@ class res_company(models.Model):
                                          help=u'进项税额，是指纳税人购进货物、加工修理修配劳务、服务、无形资产或者不动产，支付或者负担的增值税额。')
     output_tax_account = fields.Many2one('finance.account', u"销项税科目", ondelete='restrict')
 
+    operating_cost_account_id = fields.Many2one('finance.account', ondelete='restrict',
+                                                string=u'生产费用科目', help='用在组装拆卸的费用上')
 
 class bank_account(models.Model):
     _inherit = 'bank.account'

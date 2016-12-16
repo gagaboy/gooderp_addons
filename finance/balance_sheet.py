@@ -12,8 +12,8 @@ class BalanceSheet(models.Model):
     """
 
     _name = "balance.sheet"
-    _order = "line"
-
+    _order = "sequence,id"
+    sequence = fields.Integer(u'序号')
     line = fields.Integer(u'序号', required=True, help=u'资产负债表的行次')
     balance = fields.Char(u'资产')
     line_num = fields.Char(u'行次', help=u'此处行次并不是出报表的实际的行数,只是显示用的用来符合国人习惯')
@@ -43,8 +43,12 @@ class create_balance_sheet_wizard(models.TransientModel):
 
     @api.model
     def _default_period_id(self):
+
+        return self._default_period_id_impl()
+
+    def _default_period_id_impl(self):
         """
-        默认是当前会计期间
+                        默认是当前会计期间
         :return: 当前会计期间的对象
         """
         return self.env['finance.period'].get_date_now_period_id()
@@ -187,6 +191,9 @@ class ProfitStatement(models.Model):
 
     """
     _name = "profit.statement"
+    _order = "sequence,id"
+    sequence = fields.Integer(u'序号')
+
     balance = fields.Char(u'项目', help=u'报表的行次的总一个名称')
     line_num = fields.Char(u'行次', help=u'生成报表的行次')
     cumulative_occurrence_balance = fields.Float(u'本年累计金额', help=u'本年利润金额!')

@@ -1,2 +1,3 @@
 # -*- coding: utf-8 -*-
-import core
+import models
+compare_digits = 3

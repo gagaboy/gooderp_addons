@@ -93,9 +93,14 @@ class MonthProductCost(models.Model):
         :param data_dcit:
         :return:月发出成本
         """
-        balance_price = (data_dcit.get("period_begin_cost", 0) + data_dcit.get("current_period_in_cost", 0)) / \
-                        (data_dcit.get("period_begin_qty", 0) + data_dcit.get("current_period_in_qty", 0))
-        return balance_price * data_dcit.get("current_period_out_qty", 0)
+        company_row = self.env['res.company'].search([])
+        if company_row and company_row[0].cost_method == 'average':
+            balance_price = (data_dcit.get("period_begin_cost", 0) + data_dcit.get("current_period_in_cost", 0)) / \
+                            (data_dcit.get("period_begin_qty", 0) + data_dcit.get("current_period_in_qty", 0))
+            month_cost = balance_price * data_dcit.get("current_period_out_qty", 0)
+        else:
+            month_cost = data_dcit.get("current_period_out_cost", 0)
+        return round(month_cost, 2)
 
     @api.multi
     def create_month_product_cost_voucher(self, period_id, month_product_cost_dict):
@@ -172,7 +177,7 @@ class CheckOutWizard(models.TransientModel):
         :return:
         """
         if self.period_id:
-            if self.env['ir.module.module'].search([('state', '=', 'installed'), ('name', '=', 'warehouse')]):
+            if self.env['ir.module.module'].sudo().search([('state', '=', 'installed'), ('name', '=', 'warehouse')]):
                 self.env['month.product.cost'].generate_issue_cost(self.period_id)
         res = super(CheckOutWizard, self).button_checkout()
         return res

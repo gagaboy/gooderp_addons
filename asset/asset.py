@@ -88,12 +88,12 @@ class asset(models.Model):
         'finance.account', u'固定资产科目', required=True, states=READONLY_STATES)
     cost_depreciation = fields.Float(u'每月折旧额', digits=dp.get_precision(u'金额'), store=True, compute='_get_cost_depreciation')
     line_ids = fields.One2many('asset.line', 'order_id', u'折旧明细行',
-                               states=READONLY_STATES, copy=True)
+                               states=READONLY_STATES, copy=False)
     chang_ids = fields.One2many('chang.line', 'order_id', u'变更明细行',
-                               states=READONLY_STATES, copy=True)
-    voucher_id = fields.Many2one('voucher', u'对应凭证', readonly=True, ondelete='restrict')
-    money_invoice = fields.Many2one('money.invoice', u'对应结算单', readonly=True, ondelete='restrict')
-    other_money_order = fields.Many2one('other.money.order', u'对应其他应付款单', readonly=True, ondelete='restrict')
+                               states=READONLY_STATES, copy=False)
+    voucher_id = fields.Many2one('voucher', u'对应凭证', readonly=True, ondelete='restrict', copy=False)
+    money_invoice = fields.Many2one('money.invoice', u'对应结算单', readonly=True, ondelete='restrict', copy=False)
+    other_money_order = fields.Many2one('other.money.order', u'对应其他应付款单', readonly=True, ondelete='restrict', copy=False)
 
     @api.onchange('category_id')
     def onchange_category_id(self):
@@ -128,13 +128,13 @@ class asset(models.Model):
         if self.state == 'done':
             raise UserError(u'请不要重复审核！')
         if self.period_id.is_closed:
-            raise UserError(u'该会计期间已结账！不能审核')
+            raise UserError(u'该会计期间(%s)已结账！不能审核'%self.period_id.name)
         if self.cost <= 0:
-            raise UserError(u'金额必须大于0！')
+            raise UserError(u'金额必须大于0！\n金额:%s'%self.cost)
         if self.tax < 0:
-            raise UserError(u'税额必须大于0！')
+            raise UserError(u'税额必须大于0！\n税额:%s'%self.tax)
         if self.depreciation_previous < 0:
-            raise UserError(u'以前折旧必须大于0！')
+            raise UserError(u'以前折旧必须大于0！\n折旧金额:%s' % self.depreciation_previous)
         return
 
     @api.one
@@ -167,7 +167,7 @@ class asset(models.Model):
         category = self.env.ref('asset.asset')
         other_money_order = self.with_context(type='other_pay').env['other.money.order'].create({
             'state': 'draft',
-            'partner_id': self.partner_id,
+            'partner_id': self.partner_id.id,
             'date': self.date,
             'bank_id': self.bank_account.id,
         })
@@ -202,9 +202,9 @@ class asset(models.Model):
         self._wrong_asset_done()
         # 非初始化固定资产生成凭证
         if not self.is_init:
-            if self.partner_id and self.partner_id.s_category_id.account_id.id == self.account_credit.id:
+            if self.partner_id and self.partner_id.s_category_id.account_id == self.account_credit:
                 self._partner_generate_invoice()
-            elif self.bank_account and self.account_credit.id == self.bank_account.account_id.id:
+            elif self.bank_account and self.account_credit == self.bank_account.account_id:
                 self._bank_account_generate_other_pay()
             else:
                 self._construction_generate_voucher()
@@ -216,12 +216,12 @@ class asset(models.Model):
         ''' 反审核固定资产 '''
         if self.state == 'draft':
             raise UserError(u'请不要重复反审核！')
-        if self.line_ids :
+        if self.line_ids:
             raise UserError(u'已折旧不能反审核！')
-        if self.chang_ids :
+        if self.chang_ids:
             raise UserError(u'已变更不能反审核！')
         if self.period_id.is_closed:
-            raise UserError(u'该会计期间已结账！不能反审核')
+            raise UserError(u'该会计期间(%s)已结账！不能反审核'%self.period_id.name)
         self.state = 'draft'
         '''删掉凭证'''
         if self.voucher_id:
@@ -307,13 +307,13 @@ class CreateCleanWizard(models.TransientModel):
             })
 
     @api.one
-    def _generate_voucher(self):
+    def _generate_voucher(self, asset):
         ''' 生成凭证，并审核 '''
         vouch_obj = self.env['voucher'].create({'date': self.date})
         depreciation2 = sum(line.cost_depreciation for line in asset.line_ids)
         depreciation = asset.depreciation_previous + depreciation2
         income = asset.cost - depreciation
-        self.write({'voucher_id': vouch_obj.id})
+        asset.write({'voucher_id': vouch_obj.id})
         '''借方行'''
         self.env['voucher.line'].create({'voucher_id': vouch_obj.id, 'name': u'清理固定资产',
                      'debit': income, 'account_id': asset.category_id.clean_costs.id,
@@ -342,10 +342,10 @@ class CreateCleanWizard(models.TransientModel):
         # 按发票收入生成收入单
         self._generate_other_get()
         # 按费用生成支出单
-        if self.clean_cost :
+        if self.clean_cost:
             self._clean_cost_generate_other_pay(self.clean_cost)
         # 生成凭证
-        self._generate_voucher()
+        self._generate_voucher(asset)
 
 class CreateChangWizard(models.TransientModel):
     '''固定资产变更'''
@@ -413,7 +413,7 @@ class asset_line(models.Model):
     def _compute_period_id(self):
         self.period_id = self.env['finance.period'].get_period(self.date)
 
-    order_id = fields.Many2one('asset', u'订单编号', select=True,
+    order_id = fields.Many2one('asset', u'订单编号', index=True,
                                required=True, ondelete='cascade')
     cost_depreciation = fields.Float(u'每月折旧额', required=True, digits=dp.get_precision(u'金额'))
     no_depreciation = fields.Float(u'未提折旧额')
@@ -469,7 +469,7 @@ class CreateDepreciationWizard(models.TransientModel):
     def _generate_asset_line(self, asset, cost_depreciation, total):
         '''生成折旧明细行'''
         asset_line = self.env['asset.line'].create({
-             'date': asset.date,
+             'date': self.date,
              'order_id': asset.id,
              'period_id': self.period_id.id,
              'cost_depreciation': cost_depreciation,
@@ -482,11 +482,14 @@ class CreateDepreciationWizard(models.TransientModel):
     @api.multi
     def create_depreciation(self):
         ''' 资产折旧，生成凭证和折旧明细'''
+
         vouch_obj = self.env['voucher'].create({'date': self.date})
         res = {}
         asset_line_id_list = []
-        for asset in self.env['asset'].search([('no_depreciation', '=', False), ('period_id','!=', self.period_id.id)]):
-            if self.period_id not in asset.line_ids.period_id:
+        for asset in self.env['asset'].search([('no_depreciation', '=', False),
+                                               ('state', '=', 'done'), ('period_id', '!=', self.period_id.id)]):
+            if self.period_id not in [line.period_id for line in asset.line_ids] and \
+                     self.env['finance.period'].period_compare(self.period_id,asset.period_id) > 0:
                 cost_depreciation = asset.cost_depreciation
                 total = sum(line.cost_depreciation for line in asset.line_ids) + asset.depreciation_value
                 if asset.surplus_value <= (total + cost_depreciation):
@@ -502,7 +505,7 @@ class CreateDepreciationWizard(models.TransientModel):
 
         if not vouch_obj.line_ids:
             vouch_obj.unlink()
-            raise UserError(u'本期所有固定资产都已折旧！')
+            raise UserError(u'本期没有需要折旧的固定资产啦！')
         vouch_obj.voucher_done()
         view = self.env.ref('asset.asset_line_tree')
         return {
@@ -523,7 +526,7 @@ class chang_line(models.Model):
     def _compute_period_id(self):
         self.period_id = self.env['finance.period'].get_period(self.date)
 
-    order_id = fields.Many2one('asset', u'订单编号', select=True,
+    order_id = fields.Many2one('asset', u'订单编号', index=True,
                                required=True, ondelete='cascade')
     chang_name = fields.Char(u'变更内容', required=True)
     date = fields.Date(u'记帐日期', required=True)
@@ -542,7 +545,7 @@ class voucher(models.Model):
     @api.one
     def init_asset(self):
         '''删除以前引入的固定资产内容'''
-        for line in self.line_ids :
+        for line in self.line_ids:
             if line.init_obj == 'asset':
                 line.unlink()
 
@@ -553,7 +556,7 @@ class voucher(models.Model):
             depreciation_previous = asset.depreciation_previous
             '''固定资产'''
             if asset.account_asset.id not in res:
-                res[asset.account_asset.id] = {'credit':0,'debit': 0,'cate':'asset'}
+                res[asset.account_asset.id] = {'credit':0,'debit': 0} # vorcher_line 没有这个字段 ,'cate':'asset'
 
             val = res[asset.account_asset.id]
             val.update({'debit':val.get('debit') + cost,
@@ -564,7 +567,7 @@ class voucher(models.Model):
                         })
             '''累计折旧'''
             if asset.account_accumulated_depreciation.id not in res:
-                res[asset.account_accumulated_depreciation.id] = {'credit':0,'debit': 0,'cate':'asset'}
+                res[asset.account_accumulated_depreciation.id] = {'credit':0,'debit': 0} # vorcher_line 没有这个字段 ,'cate':'asset'
 
             val = res[asset.account_accumulated_depreciation.id]
             val.update({'credit':val.get('credit') + depreciation_previous,

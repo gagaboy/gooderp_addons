@@ -26,12 +26,14 @@ class wh_assembly(models.Model):
     fee = fields.Float(
         u'组装费用', digits=dp.get_precision('Amount'),
         help=u'组装单对应的组装费用，组装费用+组装行入库成本作为子件的出库成本')
-    is_many_to_many_combinations = fields.Boolean(u'多对多组合', default=False, help="通用情况是一对多的组合,当为False时\
+    is_many_to_many_combinations = fields.Boolean(u'专家模式', default=False, help="通用情况是一对多的组合,当为False时\
                             视图只能选则一个产品作为组合件,(选择模板后)此时选择数量会更改子件的数量,当为True时则可选择多个组合件,此时组合件产品数量\
                             不会自动影响子件的数量")
     goods_id = fields.Many2one('goods', string=u'组合件产品')
     goods_qty = fields.Float(u'组合件数量', default=1, digits=dp.get_precision('Quantity'), help="(选择使用模板后)当更改这个数量的时候后\
                                                                                               自动的改变相应的子件的数量")
+    voucher_id = fields.Many2one('voucher',string='凭证号')
+
     def apportion_cost(self, cost):
         for assembly in self:
             if not assembly.line_in_ids:
@@ -80,10 +82,8 @@ class wh_assembly(models.Model):
     @api.onchange('goods_id')
     def onchange_goods_id(self):
         if self.goods_id:
-            self.line_in_ids = [{'goods_id': self.goods_id.id, 'product_uos_qty': 1, 'goods_qty': 1,
+            self.line_in_ids=[{'goods_id': self.goods_id.id, 'product_uos_qty': 1, 'goods_qty': 1,
                              'uom_id': self.goods_id.uom_id.id,'uos_id':self.goods_id.uos_id.id}]
-            if self.line_out_ids:
-                self.line_out_ids[0].onchange_goods_id()
 
     @api.onchange('goods_qty')
     def onchange_goods_qty(self):
@@ -102,13 +102,13 @@ class wh_assembly(models.Model):
         warehouse_id = self.env['warehouse'].search(
             [('type', '=', 'stock')], limit=1)
         if self.bom_id:
-            line_in_ids = [{'goods_id': line.goods_id,
+            line_in_ids = [{'goods_id': line.goods_id.id,
                                'warehouse_id': self.env['warehouse'].get_warehouse_by_type(
-                                   'production'),
-                               'warehouse_dest_id': warehouse_id,
-                               'uom_id': line.goods_id.uom_id,
+                                   'production').id,
+                               'warehouse_dest_id': warehouse_id.id,
+                               'uom_id': line.goods_id.uom_id.id,
                                'goods_qty': self.goods_qty,
-                               'product_uos_qty': self.goods_qty / line.goods_id.conversion,
+                               'goods_uos_qty': self.goods_qty / line.goods_id.conversion,
                                'uos_id': line.goods_id.uos_id.id,
                            } for line in self.bom_id.line_parent_ids]
             parent_line_goods_qty = self.bom_id.line_parent_ids[0].goods_qty
@@ -118,15 +118,15 @@ class wh_assembly(models.Model):
                     warehouse_id[0], line.goods_qty / parent_line_goods_qty * self.goods_qty)
                 local_goods_qty = line.goods_qty / parent_line_goods_qty * self.goods_qty
                 line_out_ids.append({
-                    'goods_id': line.goods_id,
-                    'warehouse_id': warehouse_id,
+                    'goods_id': line.goods_id.id,
+                    'warehouse_id': warehouse_id.id,
                     'warehouse_dest_id': self.env[
                         'warehouse'].get_warehouse_by_type('production'),
-                    'uom_id': line.goods_id.uom_id,
+                    'uom_id': line.goods_id.uom_id.id,
                     'goods_qty':  local_goods_qty,
                     'cost_unit': cost_unit,
                     'cost': cost,
-                    'product_uos_qty': local_goods_qty/ line.goods_id.conversion,
+                    'goods_uos_qty': local_goods_qty/ line.goods_id.conversion,
                     'uos_id': line.goods_id.uos_id.id,
                 })
             self.line_in_ids = False
@@ -141,15 +141,59 @@ class wh_assembly(models.Model):
         if not len(self.line_in_ids) or not len(self.line_out_ids):
             raise UserError(u'组合件和子件的产品必须存在')
 
+    def create_voucher_line(self, data):
+        return [self.env['voucher.line'].create(data_line) for data_line in data]
+
+    def create_vourcher_line_data(self, assembly, voucher_row):
+        line_out_data, line_in_data = [], []
+        for line_out in assembly.line_out_ids:
+            account_id = self.env.ref('finance.account_cost').id
+            line_out_data.append({'credit': line_out.cost,
+                                         'goods_id': line_out.goods_id.id,
+                                         'voucher_id': voucher_row.id,
+                                         'account_id': account_id,
+                                         'name': u'组合单 原料'})
+        for line_in in assembly.line_in_ids:
+            account_id = line_in.goods_id.category_id.account_id.id
+            line_in_data.append({'debit': line_in.cost,
+                                        'goods_id':line_in.goods_id.id,
+                                        'voucher_id': voucher_row.id,
+                                        'account_id': account_id,
+                                        'name': u'组合单 成品'})
+        return line_out_data + line_in_data
+
+    def wh_assembly_create_voucher_line(self, assembly, voucher_row):
+        voucher_line_data = []
+        if assembly.fee:
+            account_row = assembly.create_uid.company_id.operating_cost_account_id
+            voucher_line_data.append({'name': '组装费用', 'account_id': account_row.id,
+                                      'credit': assembly.fee, 'voucher_id': voucher_row.id})
+        voucher_line_data += self.create_vourcher_line_data(assembly, voucher_row)
+        self.create_voucher_line(voucher_line_data)
+
+    def wh_assembly_create_voucher(self):
+        for assembly in self:
+            if not assembly.fee:
+                return True
+            voucher_row = self.env['voucher'].create({'date': fields.Datetime.now()})
+            self.wh_assembly_create_voucher_line(assembly, voucher_row)
+            assembly.voucher_id = voucher_row.id
+            voucher_row.voucher_done()
+
     @api.multi
     @inherits_after(res_back=False)
     def approve_order(self):
         self.check_parent_length()
+        self.wh_assembly_create_voucher()
         return self.update_parent_cost()
 
     @api.multi
     @inherits()
     def cancel_approved_order(self):
+        for assembly in self:
+            if assembly.voucher_id:
+                assembly.voucher_id.voucher_draft()
+                assembly.voucher_id.unlink()
         return True
 
     @api.multi
@@ -176,19 +220,19 @@ class wh_assembly(models.Model):
     @api.onchange('bom_id')
     def onchange_bom(self):
         line_out_ids, line_in_ids = [], []
-
+        domain = {}
         # TODO
         warehouse_id = self.env['warehouse'].search(
             [('type', '=', 'stock')], limit=1)
         if self.bom_id:
             line_in_ids = [{
-                'goods_id': line.goods_id,
+                'goods_id': line.goods_id.id,
                 'warehouse_id': self.env['warehouse'].get_warehouse_by_type(
-                    'production'),
-                'warehouse_dest_id': warehouse_id,
-                'uom_id': line.goods_id.uom_id,
+                    'production').id,
+                'warehouse_dest_id': warehouse_id.id,
+                'uom_id': line.goods_id.uom_id.id,
                 'goods_qty': line.goods_qty,
-                'product_uos_qty': line.goods_qty / line.goods_id.conversion,
+                'goods_uos_qty': line.goods_qty / line.goods_id.conversion,
                 'uos_id': line.goods_id.uos_id.id,
             } for line in self.bom_id.line_parent_ids]
 
@@ -196,40 +240,44 @@ class wh_assembly(models.Model):
                 cost, cost_unit = line.goods_id. \
                     get_suggested_cost_by_warehouse(
                         warehouse_id[0], line.goods_qty)
-
                 line_out_ids.append({
-                        'goods_id': line.goods_id,
-                        'warehouse_id': warehouse_id,
+                        'goods_id': line.goods_id.id,
+                        'warehouse_id': warehouse_id.id,
                         'warehouse_dest_id': self.env[
-                            'warehouse'].get_warehouse_by_type('production'),
-                        'uom_id': line.goods_id.uom_id,
+                            'warehouse'].get_warehouse_by_type('production').id,
+                        'uom_id': line.goods_id.uom_id.id,
                         'goods_qty': line.goods_qty,
                         'cost_unit': cost_unit,
                         'cost': cost,
-                        'product_uos_qty': self.goods_qty / line.goods_id.conversion,
+                        'goods_uos_qty': self.goods_qty / line.goods_id.conversion,
                         'uos_id': line.goods_id.uos_id.id,
                     })
             self.line_in_ids = False
             self.line_out_ids = False
         else:
             self.goods_qty=1
-        self.line_out_ids = line_out_ids
-        # /odoo-china/odoo/fields.py[1664]行添加的参数
-        # 调用self.line_in_ids = line_in_ids的时候，此时会为其额外添加一个参数(6, 0, [])
-        # 在write函数的源代码中，会直接使用原表/odoo-china/odoo/osv/fields.py(839)来删除所有数据
-        # 此时，上一步赋值的数据将会被直接删除，（不确定是bug，还是特性）
-        self.line_in_ids = line_in_ids
 
-        if len(line_in_ids) == 1 and line_in_ids:
+        if len(line_in_ids) == 1:
             """当模板中只有一个组合件的时候,默认本单据只有一个组合件 设置is_many_to_many_combinations 为False
                 使试图只能在 many2one中选择一个产品(并且只能选择在模板中的产品),并且回写数量"""
             self.is_many_to_many_combinations = False
             self.goods_qty = line_in_ids[0].get("goods_qty")
             self.goods_id = line_in_ids[0].get("goods_id")
             domain = {'goods_id': [('id', '=', self.goods_id.id)]}
-            return {'domain': domain}
+
         elif len(line_in_ids) > 1:
             self.is_many_to_many_combinations = True
+        if line_out_ids:
+            self.line_out_ids = line_out_ids
+        # /odoo-china/odoo/fields.py[1664]行添加的参数
+        # 调用self.line_in_ids = line_in_ids的时候，此时会为其额外添加一个参数(6, 0, [])
+        # 在write函数的源代码中，会直接使用原表/odoo-china/odoo/osv/fields.py(839)来删除所有数据
+        # 此时，上一步赋值的数据将会被直接删除，（不确定是bug，还是特性）
+        if line_in_ids:
+            self.line_in_ids = line_in_ids
+        return {'domain': domain}
+
+
     @api.multi
     def update_bom(self):
         for assembly in self:
@@ -292,12 +340,13 @@ class wh_disassembly(models.Model):
     fee = fields.Float(
         u'拆卸费用', digits=dp.get_precision('Amount'),
         help=u'拆卸单对应的拆卸费用, 拆卸费用+拆卸行出库成本作为子件的入库成本')
-    is_many_to_many_combinations = fields.Boolean(u'多对多组合', default=False,help="通用情况是一对多的组合,当为False时\
+    is_many_to_many_combinations = fields.Boolean(u'专家模式', default=False,help="通用情况是一对多的组合,当为False时\
                             视图只能选则一个产品作为组合件,(选择模板后)此时选择数量会更改子件的数量,当为True时则可选择多个组合件,此时组合件产品数量\
                             不会自动影响子件的数量")
     goods_id = fields.Many2one('goods', string=u'组合件产品')
     goods_qty = fields.Float(u'组合件数量',default=1, digits=dp.get_precision('Quantity'),help="(选择使用模板后)当更改这个数量的时候后\
                                                                                           自动的改变相应的子件的数量")
+    voucher_id = fields.Many2one('voucher', string='凭证号')
 
     def apportion_cost(self, cost):
         for assembly in self:
@@ -347,15 +396,59 @@ class wh_disassembly(models.Model):
         if not len(self.line_in_ids) or not len(self.line_out_ids):
             raise UserError(u'组合件和子件的产品必须存在')
 
+    def create_voucher_line(self, data):
+        return [self.env['voucher.line'].create(data_line) for data_line in data]
+
+    def create_vourcher_line_data(self, assembly, voucher_row):
+        line_out_data, line_in_data = [], []
+        for line_out in assembly.line_out_ids:
+            account_id = self.env.ref('finance.account_cost').id
+            line_out_data.append({'credit': line_out.cost,
+                                         'goods_id': line_out.goods_id.id,
+                                         'voucher_id': voucher_row.id,
+                                         'account_id': account_id,
+                                         'name': u'拆卸单 原料'})
+        for line_in in assembly.line_in_ids:
+            account_id = line_in.goods_id.category_id.account_id.id
+            line_in_data.append({'debit': line_in.cost,
+                                        'goods_id':line_in.goods_id.id,
+                                        'voucher_id': voucher_row.id,
+                                        'account_id': account_id,
+                                        'name': u'拆卸单 成品'})
+        return line_out_data + line_in_data
+
+    def wh_disassembly_create_voucher_line(self, disassembly, voucher_row):
+        voucher_line_data = []
+        if disassembly.fee:
+            account_row = disassembly.create_uid.company_id.operating_cost_account_id
+            voucher_line_data.append({'name': '拆卸费用', 'account_id': account_row.id,
+                                      'credit': disassembly.fee, 'voucher_id': voucher_row.id})
+        voucher_line_data += self.create_vourcher_line_data(disassembly, voucher_row)
+        self.create_voucher_line(voucher_line_data)
+
+    def wh_disassembly_create_voucher(self):
+        for disassembly in self:
+            if not disassembly.fee:
+                return True
+            voucher_row = self.env['voucher'].create({'date': fields.Datetime.now()})
+            self.wh_disassembly_create_voucher_line(disassembly, voucher_row)
+            disassembly.voucher_id = voucher_row.id
+            voucher_row.voucher_done()
+
     @api.multi
     @inherits_after(res_back=False)
     def approve_order(self):
         self.check_parent_length()
+        self.wh_disassembly_create_voucher()
         return self.update_child_cost()
 
     @api.multi
     @inherits()
     def cancel_approved_order(self):
+        for disassembly in self:
+            if disassembly.voucher_id:
+                disassembly.voucher_id.voucher_draft()
+                disassembly.voucher_id.unlink()
         return True
 
     @api.multi
@@ -382,9 +475,14 @@ class wh_disassembly(models.Model):
     @api.onchange('goods_id')
     def onchange_goods_id(self):
         if self.goods_id:
+            warehouse_id = self.env['warehouse'].search(
+                [('type', '=', 'stock')], limit=1)
             self.line_out_ids = [{'goods_id': self.goods_id.id, 'product_uos_qty': 1, 'goods_qty': 1,
-                              'uos_id':self.goods_id.uos_id.id,'uom_id': self.goods_id.uom_id.id}]
-            self.line_out_ids[0].onchange_goods_id()
+                                  'warehouse_id': self.env['warehouse'].get_warehouse_by_type('production').id,
+                                  'warehouse_dest_id': warehouse_id.id,
+                                  'uom_id': self.goods_id.uom_id.id,
+                                  'uos_id': self.goods_id.uos_id.id,
+                                  }]
 
     @api.onchange('goods_qty')
     def onchange_goods_qty(self):
@@ -407,39 +505,43 @@ class wh_disassembly(models.Model):
             cost, cost_unit = parent_line.goods_id \
                  .get_suggested_cost_by_warehouse(
                  warehouse_id, self.goods_qty)
+
             line_out_ids.append({
-                 'goods_id': parent_line.goods_id,
+                 'goods_id': parent_line.goods_id.id,
                  'warehouse_id': self.env[
-                     'warehouse'].get_warehouse_by_type('production'),
-                 'warehouse_dest_id': warehouse_id,
-                 'uom_id': parent_line.goods_id.uom_id,
+                     'warehouse'].get_warehouse_by_type('production').id,
+                 'warehouse_dest_id': warehouse_id.id,
+                 'uom_id': parent_line.goods_id.uom_id.id,
                  'goods_qty': self.goods_qty,
-                 'product_uos_qty': self.goods_qty/parent_line.goods_id.conversion,
+                 'goods_uos_qty': self.goods_qty/parent_line.goods_id.conversion,
                  'uos_id':parent_line.goods_id.uos_id.id,
                  'cost_unit': cost_unit,
                  'cost': cost,
              })
 
             line_in_ids = [{
-                            'goods_id': line.goods_id,
-                            'warehouse_id': warehouse_id,
+                            'goods_id': line.goods_id.id,
+                            'warehouse_id': warehouse_id.id,
                             'warehouse_dest_id': self.env[
-                                'warehouse'].get_warehouse_by_type('production'),
-                            'uom_id': line.goods_id.uom_id,
+                                'warehouse'].get_warehouse_by_type('production').id,
+                            'uom_id': line.goods_id.uom_id.id,
                             'goods_qty': line.goods_qty/parent_line.goods_qty*self.goods_qty,
-                            'product_uos_qty': line.goods_qty/parent_line.goods_qty*self.goods_qty/line.goods_id.conversion,
+                            'goods_uos_qty': line.goods_qty/parent_line.goods_qty*self.goods_qty/line.goods_id.conversion,
                             'uos_id':line.goods_id.uos_id.id,
                         } for line in self.bom_id.line_child_ids]
-            self.line_in_ids = False
-            self.line_out_ids = False
-            self.line_out_ids = line_out_ids or False
-            self.line_in_ids = line_in_ids or False
+
+            if line_out_ids:
+                self.line_out_ids = line_out_ids
+            if line_in_ids:
+                self.line_in_ids = line_in_ids
+
         elif self.line_out_ids:
             self.line_out_ids[0].goods_qty = self.goods_qty
 
     @api.onchange('bom_id')
     def onchange_bom(self):
         line_out_ids, line_in_ids = [], []
+        domain = {}
         # TODO
         warehouse_id = self.env['warehouse'].search(
             [('type', '=', 'stock')], limit=1)
@@ -452,24 +554,24 @@ class wh_disassembly(models.Model):
                 line_out_ids.append({
                         'goods_id': line.goods_id,
                         'warehouse_id': self.env[
-                            'warehouse'].get_warehouse_by_type('production'),
-                        'warehouse_dest_id': warehouse_id,
-                        'uom_id': line.goods_id.uom_id,
+                            'warehouse'].get_warehouse_by_type('production').id,
+                        'warehouse_dest_id': warehouse_id.id,
+                        'uom_id': line.goods_id.uom_id.id,
                         'goods_qty': line.goods_qty,
-                        'product_uos_qty': line.goods_qty/line.goods_id.conversion,
+                        'goods_uos_qty': line.goods_qty/line.goods_id.conversion,
                         'uos_id':line.goods_id.uos_id.id,
                         'cost_unit': cost_unit,
                         'cost': cost,
                     })
 
             line_in_ids = [{
-                'goods_id': line.goods_id,
+                'goods_id': line.goods_id.id,
                 'warehouse_id': warehouse_id,
                 'warehouse_dest_id': self.env[
-                    'warehouse'].get_warehouse_by_type('production'),
-                'uom_id': line.goods_id.uom_id,
+                    'warehouse'].get_warehouse_by_type('production').id,
+                'uom_id': line.goods_id.uom_id.id,
                 'goods_qty': line.goods_qty,
-                'product_uos_qty': line.goods_qty/line.goods_id.conversion,
+                'goods_uos_qty': line.goods_qty/line.goods_id.conversion,
                 'uos_id':line.goods_id.uos_id.id,
             } for line in self.bom_id.line_child_ids]
 
@@ -477,19 +579,23 @@ class wh_disassembly(models.Model):
             self.line_out_ids = False
         else:
             self.goods_qty=1
-
-        self.line_out_ids = line_out_ids or False
-        self.line_in_ids = line_in_ids or False
         if len(line_out_ids) == 1 and line_out_ids:
             """当模板中只有一个组合件的时候,默认本单据只有一个组合件 设置is_many_to_many_combinations 为False
              使试图只能在 many2one中选择一个产品(并且只能选择在模板中的产品),并且回写数量"""
-            self.is_many_to_many_combinations = False
+            self.is_many_to_many_combinations = ''
             self.goods_qty = line_out_ids[0].get("goods_qty")
             self.goods_id = line_out_ids[0].get("goods_id")
             domain = {'goods_id': [('id', '=', self.goods_id.id)]}
-            return {'domain': domain}
+
         elif len(line_out_ids) > 1:
             self.is_many_to_many_combinations = True
+        if line_out_ids:
+            self.line_out_ids = line_out_ids
+        if line_in_ids:
+            self.line_in_ids = line_in_ids
+        return {'domain': domain}
+
+
 
     @api.multi
     def update_bom(self):

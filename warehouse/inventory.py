@@ -21,11 +21,21 @@ class wh_inventory(models.Model):
         ('done', u'完成'),
     ]
 
+    @api.model
+    def _get_default_warehouse_impl(self):
+        if self.env.context.get('warehouse_type', 'stock'):
+            return self.env['warehouse'].get_warehouse_by_type(
+                    self.env.context.get('warehouse_type', 'stock'))
+    @api.model
+    def _get_default_warehouse(self):
+        '''获取盘点仓库'''
+        return self._get_default_warehouse_impl()
+
     date = fields.Date(u'日期', default=fields.Date.context_today,
                        help=u'盘点单创建日期，默认为当前天')
     name = fields.Char(u'名称', copy=False, default='/',
                        help=u'单据编号，创建时会自动生成')
-    warehouse_id = fields.Many2one('warehouse', u'仓库', required=True,
+    warehouse_id = fields.Many2one('warehouse', u'仓库', required=True, default=_get_default_warehouse,
                                    help=u'盘点单盘点的仓库')
     goods = fields.Char(u'产品',
                         help=u'盘点单盘点的产品')
@@ -228,23 +238,9 @@ class wh_inventory(models.Model):
             inventory.delete_line()
             line_ids = inventory.get_line_detail(inventory.uos_not_zero)
             for line in line_ids:
-                line_obj.create({
-                        'inventory_id': inventory.id,
-                        'warehouse_id': line.get('warehouse_id'),
-                        'goods_id': line.get('goods_id'),
-                        'attribute_id': line.get('attribute_id'),
-                        'lot': line.get('lot'),
-                        'uom_id': line.get('uom_id'),
-                        'uos_id': line.get('uos_id'),
-                        'real_qty': line.get('qty'),
-                        'real_uos_qty': line.get('uos_qty'),
-                        'inventory_qty': line.get('qty'),
-                        'inventory_uos_qty': line.get('uos_qty'),
-                    })
-
+                line_obj.create_wh_inventory_line_by_data(inventory.id,line)
             if line_ids:
                 inventory.state = 'query'
-
         return True
 
 
@@ -256,6 +252,18 @@ class wh_inventory_line(models.Model):
         ('in', u'入库'),
         ('nothing', u'不做处理'),
     ]
+
+    @api.multi
+    @api.depends('inventory_qty', 'real_qty')
+    def _get_difference_qty(self):
+        for line in self:
+            line.difference_qty = line.inventory_qty - line.real_qty
+
+    @api.multi
+    @api.depends('inventory_uos_qty', 'real_uos_qty')
+    def _get_difference_uos_qty(self):
+        for line in self:
+            line.difference_uos_qty = line.inventory_uos_qty - line.real_uos_qty
 
     inventory_id = fields.Many2one('wh.inventory', u'盘点', ondelete='cascade',
                                    help=u'盘点单行对应的盘点单')
@@ -276,7 +284,7 @@ class wh_inventory_line(models.Model):
     new_lot = fields.Char(u'盘盈批号',
                           help=u'盘点单行对应的产品盘盈批号')
     new_lot_id = fields.Many2one('wh.move.line', u'盘亏批号',
-                                ondelete='restrict',
+                                 ondelete='restrict',
                                  help=u'盘点单行对应的产品盘亏批号')
     lot_type = fields.Selection(LOT_TYPE, u'批号类型', default='nothing',
                                 help=u'批号类型: 出库、入库、不做处理')
@@ -298,10 +306,12 @@ class wh_inventory_line(models.Model):
         help=u'盘点单行对应的产品的盘点辅助单位库存')
     difference_qty = fields.Float(
         u'盘盈盘亏', digits=dp.get_precision('Quantity'),
+        compute='_get_difference_qty',
         help=u'盘点单行对应的产品的盘盈盘亏数量')
     difference_uos_qty = fields.Float(
         u'辅助单位盘盈盘亏', digits=dp.get_precision('Quantity'),
-        help = u'盘点单行对应的产品的辅助单位盘盈盘亏数量')
+        compute='_get_difference_uos_qty',
+        help=u'盘点单行对应的产品的辅助单位盘盈盘亏数量')
 
     def check_difference_identical(self):
         if self.difference_qty * self.difference_uos_qty < 0:
@@ -312,6 +322,22 @@ class wh_inventory_line(models.Model):
                 'title': u'错误',
                 'message': u'盘盈盘亏数量应该与辅助单位的盘盈盘亏数量盈亏方向一致',
             }}
+
+    def create_wh_inventory_line_by_data(self, inventory_id, line_data):
+        self.create({
+            'inventory_id': inventory_id,
+            'warehouse_id': line_data.get('warehouse_id'),
+            'goods_id': line_data.get('goods_id'),
+            'attribute_id': line_data.get('attribute_id'),
+            'lot': line_data.get('lot'),
+            'uom_id': line_data.get('uom_id'),
+            'uos_id': line_data.get('uos_id'),
+            'real_qty': line_data.get('qty'),
+            'real_uos_qty': line_data.get('uos_qty'),
+            'inventory_qty': line_data.get('qty'),
+            'inventory_uos_qty': line_data.get('uos_qty'),
+        })
+
 
     def line_role_back(self):
         self.inventory_qty = self.real_qty
@@ -326,8 +352,6 @@ class wh_inventory_line(models.Model):
     @api.onchange('inventory_qty')
     def onchange_qty(self):
         self.ensure_one()
-        self.difference_qty = self.inventory_qty - self.real_qty
-        self.difference_uos_qty = self.inventory_uos_qty - self.real_uos_qty
 
         if self.goods_id and self.goods_id.using_batch:
             if self.goods_id.force_batch_one and self.difference_qty:

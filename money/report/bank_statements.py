@@ -16,7 +16,7 @@ class bank_statements_report(models.Model):
         # 相邻的两条记录，bank_id不同，重新计算账户余额
         pre_record = self.search([('id', '=', self.id - 1), ('bank_id', '=', self.bank_id.id)])
         if pre_record:
-            if pre_record.name != u'期初余额':
+            if pre_record.name != '期初':
                 before_balance = pre_record.this_balance
             else:
                 before_balance = pre_record.get
@@ -85,12 +85,14 @@ class bank_statements_report(models.Model):
                         mto.date,
                         mto.name,
                         0 AS get,
-                        mtol.amount AS pay,
+                        (CASE WHEN ba.currency_id IS NULL OR rc.name='CNY' THEN mtol.amount ELSE mtol.currency_amount END) AS pay,
                         0 AS balance,
                         NULL AS partner_id,
                         mto.note
                 FROM money_transfer_order_line AS mtol
                 LEFT JOIN money_transfer_order AS mto ON mtol.transfer_id = mto.id
+                LEFT JOIN bank_account AS ba ON ba.id = mtol.out_bank_id
+                LEFT JOIN res_currency AS rc ON rc.id = ba.currency_id
                 WHERE mto.state = 'done'
                 UNION ALL
                 SELECT  mtol.in_bank_id AS bank_id,
