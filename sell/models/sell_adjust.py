@@ -1,4 +1,4 @@
-# -*- encoding: utf-8 -*-
+# -*- coding: utf-8 -*-
 
 from odoo import fields, models, api
 import odoo.addons.decimal_precision as dp
@@ -210,6 +210,12 @@ class sell_adjust_line(models.Model):
                 self.tax_rate = self.order_id.order_id.partner_id.tax_rate
             else:
                 self.tax_rate = self.env.user.company_id.output_tax_rate
+
+        goods_saleable_list = []
+        for goods in self.env['goods'].search([('not_saleable', '=', False)]):
+            goods_saleable_list.append(goods.id)
+
+        return {'domain': {'goods_id': [('id', 'in', goods_saleable_list)]}}
 
     @api.onchange('quantity', 'price_taxed', 'discount_rate')
     def onchange_discount_rate(self):

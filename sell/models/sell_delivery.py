@@ -1,4 +1,4 @@
-# -*- encoding: utf-8 -*-
+# -*- coding: utf-8 -*-
 
 from odoo import fields, models, api
 import odoo.addons.decimal_precision as dp
@@ -194,14 +194,16 @@ class sell_delivery(models.Model):
                 raise UserError(u'产品 %s 的数量和产品含税单价不能小于0！' % line.goods_id.name)
         if not self.bank_account_id and self.receipt:
             raise UserError(u'收款额不为空时，请选择结算账户！')
-        if self.receipt > self.amount + self.partner_cost:
+        decimal_amount = self.env.ref('core.decimal_amount')
+        if float_compare(self.receipt, self.amount + self.partner_cost, precision_digits=decimal_amount.digits) == 1:
             raise UserError(u'本次收款金额不能大于优惠后金额！\n本次收款金额:%s 优惠后金额:%s' %
                             (self.receipt, self.amount + self.partner_cost))
         # 发库单/退货单 计算客户的 本次发货金额+客户应收余额 是否小于客户信用额度， 否则报错
         if not self.is_return:
             amount = self.amount + self.partner_cost
             if self.partner_id.credit_limit != 0:
-                if amount - self.receipt + self.partner_id.receivable > self.partner_id.credit_limit:
+                if float_compare(amount - self.receipt + self.partner_id.receivable, self.partner_id.credit_limit,
+                                 precision_digits=decimal_amount.digits) == 1:
                     raise UserError(u'本次发货金额 + 客户应收余额 - 本次收款金额 不能大于客户信用额度！\n\
                      本次发货金额:%s\n 客户应收余额:%s\n 本次收款金额:%s\n客户信用额度:%s' % (
                     amount, self.receipt, self.partner_id.receivable, self.partner_id.credit_limit))
@@ -383,10 +385,20 @@ class wh_move_line(models.Model):
     def onchange_goods_id(self):
         '''当订单行的产品变化时，带出产品上的零售价，以及公司的销项税'''
         self.ensure_one()
+        is_return = self.env.context.get('default_is_return')
         if self.goods_id:
-            is_return = self.env.context.get('default_is_return')
             # 如果是销售发货单行 或 销售退货单行
             if (self.type == 'out' and not is_return) or (self.type == 'in' and is_return):
                 self._delivery_get_price_and_tax()
 
-        return super(wh_move_line,self).onchange_goods_id()
+        domain = super(wh_move_line,self).onchange_goods_id()
+        if (self.type == 'out' and not is_return) or (self.type == 'in' and is_return):
+            goods_saleable_list = []
+            for goods in self.env['goods'].search([('not_saleable', '=', False)]):
+                goods_saleable_list.append(goods.id)
+
+            if domain:
+                domain['domain'].update({'goods_id': [('id', 'in', goods_saleable_list)]})
+            else:
+                domain = {'domain': {'goods_id': [('id', 'in', goods_saleable_list)]}}
+        return domain

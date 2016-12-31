@@ -43,7 +43,8 @@ class money_order(models.Model):
 
         # 创建时查找该业务伙伴是否存在 未审核 状态下的收付款单
         orders = self.env['money.order'].search([('partner_id', '=', values.get('partner_id')),
-                                                 ('state', '=', 'draft')])
+                                                 ('state', '=', 'draft'),
+                                                 ('id', '!=', self.id)])
         if orders:
             raise UserError(u'该业务伙伴存在未审核的收/付款单，请先审核')
 
@@ -54,7 +55,8 @@ class money_order(models.Model):
         # 保存时查找该业务伙伴是否存在 未审核 状态下的收付款单
         if values.get('partner_id'):
             orders = self.env['money.order'].search([('partner_id', '=', values.get('partner_id')),
-                                                     ('state', '=', 'draft')])
+                                                     ('state', '=', 'draft'),
+                                                     ('id', '!=', self.id)])
             if orders:
                 raise UserError(u'业务伙伴(%s)存在未审核的收/付款单，请先审核'%orders.partner_id.name)
 
@@ -118,7 +120,9 @@ class money_order(models.Model):
                                    digits=dp.get_precision('Amount'),
                                    help=u'收款时发生的银行手续费或付款时给供应商的现金折扣。')
     discount_account_id = fields.Many2one('finance.account', u'费用科目',
-                                       help=u'收付款单审核生成凭证时，手续费或折扣对应的科目')
+                                          readonly=True,
+                                          states={'draft': [('readonly', False)]},
+                                          help=u'收付款单审核生成凭证时，手续费或折扣对应的科目')
     line_ids = fields.One2many('money.order.line', 'money_id',
                                string=u'收付款单行', readonly=True,
                                states={'draft': [('readonly', False)]},
@@ -172,12 +176,7 @@ class money_order(models.Model):
                 'date_due': invoice.date_due,
                 }
 
-    @api.onchange('partner_id')
-    def onchange_partner_id(self):
-        if not self.partner_id:
-            return {}
-
-        source_lines = []
+    def _get_invoice_search_list(self):
         invoice_search_list = [('partner_id', '=', self.partner_id.id),
                                ('to_reconcile', '!=', 0)]
         if self.env.context.get('type') == 'get':
@@ -185,10 +184,18 @@ class money_order(models.Model):
         else: # type = 'pay':
             invoice_search_list.append(('category_id.type', '=', 'expense'))
 
-            self.bank_name = self.partner_id.bank_name
-            self.bank_num = self.partner_id.bank_num
+        return invoice_search_list
 
-        for invoice in self.env['money.invoice'].search(invoice_search_list):
+    @api.onchange('partner_id')
+    def onchange_partner_id(self):
+        if not self.partner_id:
+            return {}
+
+        source_lines = []
+        self.bank_name = self.partner_id.bank_name
+        self.bank_num = self.partner_id.bank_num
+
+        for invoice in self.env['money.invoice'].search(self._get_invoice_search_list()):
             source_lines.append(self._get_source_line(invoice))
         if source_lines:
             self.source_ids = source_lines
@@ -219,7 +226,7 @@ class money_order(models.Model):
                 total += line.amount
 
             if order.type == 'pay':
-                order.partner_id.payable -= total + self.discount_amount
+                order.partner_id.payable -= total - self.discount_amount
             else:
                 order.partner_id.receivable -= total + self.discount_amount
 
@@ -229,8 +236,8 @@ class money_order(models.Model):
                 if 'value1' is lower than, equal to, or greater than 'value2' at the given precision'''
                 decimal_amount = self.env.ref('core.decimal_amount')
                 if float_compare(source.this_reconcile, abs(source.to_reconcile), precision_digits=decimal_amount.digits) == 1:
-                    raise UserError(u'本次核销金额不能大于未核销金额!\n 核销金额:%s 未审核金额:%s'
-                                    %( abs(source.to_reconcile),source.this_reconcile))
+                    raise UserError(u'本次核销金额不能大于未核销金额!\n 核销金额:%s 未核销金额:%s'
+                                    %(abs(source.to_reconcile),source.this_reconcile))
 
                 source.to_reconcile = (source.to_reconcile - 
                                        source.this_reconcile)
@@ -249,9 +256,9 @@ class money_order(models.Model):
 
             total = 0
             for line in order.line_ids:
-                if order.type == 'pay':  # 付款账号余额减少
+                if order.type == 'pay':  # 反审核：付款账号余额增加
                     line.bank_id.balance += line.amount
-                else:  # 收款账号余额增加
+                else:  # 反审核：收款账号余额减少
                     decimal_amount = self.env.ref('core.decimal_amount')
                     if float_compare(line.bank_id.balance, line.amount, precision_digits=decimal_amount.digits) == -1:
                         raise UserError(u'账户余额不足!\n 账户余额:%s 订单金额:%s' % (line.bank_id.balance, line.amount))
@@ -259,8 +266,7 @@ class money_order(models.Model):
                 total += line.amount
 
             if order.type == 'pay':
-                order.partner_id.payable += total + self.discount_amount
-
+                order.partner_id.payable += total - self.discount_amount
             else:
                 order.partner_id.receivable += total + self.discount_amount
 
@@ -311,7 +317,16 @@ class money_order_line(models.Model):
 class money_invoice(models.Model):
     _name = 'money.invoice'
     _description = u'结算单'
-    _rec_name = 'bill_number'
+    # _rec_name = 'bill_number'
+
+    @api.multi
+    def name_get(self):
+        '''在many2one字段里显示 名称_票号'''
+        res = []
+
+        for invoice in self:
+            res.append((invoice.id, invoice.bill_number and invoice.bill_number or invoice.name))
+        return res
 
     state = fields.Selection([
                           ('draft', u'草稿'),
@@ -387,6 +402,71 @@ class money_invoice(models.Model):
                 raise UserError(u'不可以删除已经审核的单据')
 
         return super(money_invoice, self).unlink()
+
+    @api.multi
+    def find_source_order(self):
+        '''
+        查看原始单据，有以下情况：销售发货单、销售退货单、采购退货单、采购入库单、
+        项目、委外加工单、核销单、购货订单、固定资产、固定资产变更以及期初应收应付。
+        '''
+        self.ensure_one()
+        code = False
+        res_models = [
+            'reconcile.order',
+        ]
+        views = [
+            'money.reconcile_order_form',
+        ]
+        # 判断当前数据库中否存在该 model
+        if self.env['ir.module.module'].sudo().search([
+            ('state', '=', 'installed'),
+            ('name', '=', 'sell')]):
+            res_models += ['sell.delivery', 'outsource']
+            views += ['sell.sell_delivery_form', 'warehouse.outsource_form']
+        if self.env['ir.module.module'].sudo().search([
+            ('state', '=', 'installed'),
+            ('name', '=', 'buy')]):
+            res_models += ['buy.receipt', 'buy.order']
+            views += ['buy.buy_receipt_form', 'buy.buy_order_form']
+        if self.env['ir.module.module'].sudo().search([
+            ('state', '=', 'installed'),
+            ('name', '=', 'task')]):
+            res_models += ['project']
+            views += ['task.project_form']
+        if self.env['ir.module.module'].sudo().search([
+            ('state', '=', 'installed'),
+            ('name', '=', 'asset')]):
+            res_models += ['asset']
+            views += ['asset.asset_form']
+        if u'固定资产变更' in self.name:
+            code = self.name.replace('固定资产变更', '')
+        elif u'固定资产' in self.name:
+            code = self.name.replace('固定资产', '')
+        domain = code and [('code', '=', code)] or [('name', '=', self.name)]
+
+        for i in range(len(res_models)):
+            res_model = code and 'asset' or res_models[i]
+            view = code and self.env.ref('asset.asset_form') or self.env.ref(views[i])
+            res = self.env[res_model].search(domain)
+            if res:
+                break
+
+        if not res:
+            raise UserError(u'没有原始单据可供查看！')
+
+        if res_model == 'sell.delivery' and res.is_return:
+            view = self.env.ref('sell.sell_return_form')
+        elif res_model == 'buy.receipt' and res.is_return:
+            view = self.env.ref('buy.buy_return_form')
+        return {
+            'view_type': 'form',
+            'view_mode': 'form',
+            'view_id': False,
+            'views': [(view.id, 'form')],
+            'res_model': res_model,
+            'type': 'ir.actions.act_window',
+            'res_id': res.id,
+        }
 
 
 class source_order_line(models.Model):

@@ -57,7 +57,7 @@ class supplier_statements_report(models.Model):
         tools.drop_view_if_exists(cr, 'supplier_statements_report')
         cr.execute("""
             CREATE or REPLACE VIEW supplier_statements_report AS (
-            SELECT  ROW_NUMBER() OVER(ORDER BY partner_id,done_date) AS id,
+            SELECT  ROW_NUMBER() OVER(ORDER BY partner_id) AS id,
                     partner_id,
                     name,
                     date,
@@ -104,6 +104,23 @@ class supplier_statements_report(models.Model):
                 LEFT JOIN core_category AS c ON mi.category_id = c.id
                 LEFT JOIN buy_receipt AS br ON br.buy_move_id = mi.move_id
                 WHERE c.type = 'expense' AND mi.state = 'done'
+                UNION ALL
+                SELECT  ro.partner_id,
+                        ro.name,
+                        ro.date,
+                        ro.write_date AS done_date,
+                        0 AS purchase_amount,
+                        0 AS benefit_amount,
+                        0 AS amount,
+                        sol.this_reconcile AS pay_amount,
+                        0 AS discount_money,
+                        0 AS balance_amount,
+                        Null AS note,
+                        0 AS move_id
+                FROM reconcile_order AS ro
+                LEFT JOIN money_invoice AS mi ON mi.name = ro.name
+                LEFT JOIN source_order_line AS sol ON sol.payable_reconcile_id = ro.id
+                WHERE ro.state = 'done' AND mi.state = 'done' AND mi.name ilike 'RO%'
                 ) AS ps)
         """)
 
@@ -249,5 +266,3 @@ class supplier_statements_report_with_goods(models.TransientModel):
                 }
 
         raise UserError(u'期初余额没有原始单据可供查看！')
-
-# vim:expandtab:smartindent:tabstop=4:softtabstop=4:shiftwidth=4:

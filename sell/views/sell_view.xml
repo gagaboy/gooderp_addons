@@ -215,6 +215,8 @@
 		    						'type':'out',
 		         					'default_date':date,
 		         					'default_partner':partner_id,
+		         					'default_warehouse_id': warehouse_id,
+		         					'default_is_return': is_return,
 		    						}">
 		         					<tree string='销售发货单行' editable='bottom'>
 		         						<field name='goods_id'
@@ -247,6 +249,7 @@
 				 						<field name='using_batch' invisible='1'/>
 			                            <field name='lot_qty' invisible='1'/>
 			                            <field name='price' invisible='1'/>
+			                            <field name='lot' invisible='1'/>
 				 					</tree>
 				 				</field>
 			 				</page>
@@ -267,8 +270,7 @@
 			            </notebook>
 		 				<group>
                 			<group>
-								<field name="discount_rate" groups='sell.sell_discount_groups' attrs="{'readonly': [('state','!=','draft')]}"/>
-								<field name="discount_amount" groups='sell.sell_discount_groups'/>
+								<field name="discount_amount" string="抹零" groups='sell.sell_discount_groups'/>
                     			<field name="amount"/>
                     			<field name="partner_cost" attrs="{'readonly': [('state','!=','draft')]}"/>
                 			</group>
@@ -393,6 +395,7 @@
 		    					<field name='line_in_ids' attrs="{'readonly': [('state','!=','draft')]}"
 		    						context="{
 		    						'type':'in',
+                                    'default_is_return': is_return,
 		    						}">
 		         					<tree string='销售退货单行' editable='bottom'>
 		         						<field name='goods_id'
