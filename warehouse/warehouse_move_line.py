@@ -55,6 +55,16 @@ class wh_move_line(models.Model):
         self.amount = self.subtotal - self.tax_amount # 金额
 
     @api.one
+    def _inverse_price(self):
+        '''由不含税价反算含税价，保存时生效'''
+        self.price_taxed = self.price * (1 + self.tax_rate * 0.01)
+
+    @api.onchange('price', 'tax_rate')
+    def onchange_price(self):
+        '''当订单行的不含税单价改变时，改变含税单价'''
+        self.price_taxed = self.price * (1 + self.tax_rate * 0.01)
+
+    @api.one
     @api.depends('goods_id')
     def _compute_using_attribute(self):
         self.using_attribute = self.goods_id.attribute_ids and True or False
@@ -91,13 +101,21 @@ class wh_move_line(models.Model):
         else:
             self.goods_uos_qty = 0
 
+    @api.depends('goods_id', 'goods_qty')
+    def compute_line_net_weight(self):
+        for move_line in self:
+            move_line.line_net_weight = move_line.goods_id.net_weight * move_line.goods_qty
+
     move_id = fields.Many2one('wh.move', string=u'移库单', ondelete='cascade',
                               help=u'出库/入库/移库单行对应的移库单')
     date = fields.Date(u'完成日期', copy=False,
                        help=u'单据完成日期')
     cost_time = fields.Datetime(u'审核时间', copy=False,
                                 help=u'单据审核时间')
-    type = fields.Selection(MOVE_LINE_TYPE, u'类型', default=lambda self: self.env.context.get('type'),
+    type = fields.Selection(MOVE_LINE_TYPE,
+                            u'类型',
+                            required=True,
+                            default=lambda self: self.env.context.get('type'),
                             help=u'类型：出库、入库 或者 内部调拨')
     state = fields.Selection(MOVE_LINE_STATE, u'状态', copy=False, default='draft',
                              help=u'状态标识，新建时状态为草稿;审核后状态为已审核')
@@ -142,13 +160,18 @@ class wh_move_line(models.Model):
                                         store=True,
                                         compute=_get_line_warehouse_dest,
                                         help=u'单据的目的仓库')
-    goods_qty = fields.Float(u'数量', digits=dp.get_precision('Quantity'), default=1,
+    goods_qty = fields.Float(u'数量',
+                             digits=dp.get_precision('Quantity'),
+                             default=1,
+                             required=True,
                              help=u'产品的数量')
     goods_uos_qty = fields.Float(u'辅助数量', digits=dp.get_precision('Quantity'),
                                  compute=_get_goods_uos_qty, store=True,
                                  help=u'产品的辅助数量')
-    price = fields.Float(u'单价', compute=_compute_all_amount,
-                         store=True, readonly=True,
+    price = fields.Float(u'单价',
+                         compute=_compute_all_amount,
+                         inverse=_inverse_price,
+                         store=True,
                          digits=dp.get_precision('Amount'),
                          help=u'产品的单价')
     price_taxed = fields.Float(u'含税单价',
@@ -159,15 +182,15 @@ class wh_move_line(models.Model):
     discount_amount = fields.Float(u'折扣额',
                                    digits=dp.get_precision('Amount'),
                                    help=u'单据的折扣额')
-    amount = fields.Float(u'金额',compute=_compute_all_amount, store=True, readonly=True,
+    amount = fields.Float(u'金额',compute=_compute_all_amount, store=True,
                           digits=dp.get_precision('Amount'),
                           help=u'单据的金额,计算得来')
     tax_rate = fields.Float(u'税率(%)',
                             help=u'单据的税率(%)')
-    tax_amount = fields.Float(u'税额', compute=_compute_all_amount, store=True, readonly=True,
+    tax_amount = fields.Float(u'税额', compute=_compute_all_amount, store=True,
                               digits=dp.get_precision('Amount'),
                               help=u'单据的税额,有单价×数量×税率计算得来')
-    subtotal = fields.Float(u'价税合计', compute=_compute_all_amount, store=True, readonly=True,
+    subtotal = fields.Float(u'价税合计', compute=_compute_all_amount, store=True,
                             digits=dp.get_precision('Amount'),
                             help=u'价税合计,有不含税金额+税额计算得来')
     note = fields.Text(u'备注',
@@ -177,6 +200,7 @@ class wh_move_line(models.Model):
     cost = fields.Float(u'成本', compute='_compute_cost', inverse='_inverse_cost',
                         digits=dp.get_precision('Amount'), store=True,
                         help=u'入库/出库成本')
+    line_net_weight = fields.Float(string=u'净重小计', compute=compute_line_net_weight, store=True)
 
     @api.one
     @api.depends('cost_unit', 'goods_qty')
