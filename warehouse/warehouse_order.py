@@ -141,22 +141,21 @@ class wh_in(models.Model):
         self.voucher_id = vouch_id
         debit_sum = 0
         for line in self.line_in_ids:
+            init_obj = self.is_init and 'init_warehouse - %s' % (self.id) or ''
             if line.cost:
-                vourch_line = self.env['voucher.line'].create({
-                                'name': self.name,
-                                'account_id': line.goods_id.category_id.account_id.id,
-                                'debit': line.cost,
-                                'voucher_id': vouch_id.id,
-                                'goods_id': line.goods_id.id,
-                                })
-            if self.is_init:
-                vourch_line.init_obj = 'init_warehouse- %s' % (self.id)
+                self.env['voucher.line'].create({
+                    'name': self.name,
+                    'account_id': line.goods_id.category_id.account_id.id,
+                    'debit': line.cost,
+                    'voucher_id': vouch_id.id,
+                    'goods_id': line.goods_id.id,
+                    'init_obj': init_obj,
+                })
             debit_sum += line.cost
 
-        if self.type == 'inventory':
-            account = self.env.ref('finance.small_business_chart1901')
-        else:
-            account = self.env.ref('finance.small_business_chart5051')
+        # 贷方科目： 主营业务成本
+        account = self.env.ref('finance.account_cost')
+
         if not self.is_init:
             if debit_sum:
                 self.env['voucher.line'].create({
@@ -215,9 +214,10 @@ class wh_internal(models.Model):
     @api.multi
     @inherits()
     def approve_order(self):
-        result_vals = self.env['wh.move'].create_zero_wh_in(self, self._name)
-        if result_vals:
-            return result_vals
+        if self.env.user.company_id.is_enable_negative_stock:
+            result_vals = self.env['wh.move'].create_zero_wh_in(self, self._name)
+            if result_vals:
+                return result_vals
         return True
 
     @api.multi
