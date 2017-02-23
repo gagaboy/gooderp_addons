@@ -12,6 +12,7 @@ from odoo import api
 
 class wh_inventory(models.Model):
     _name = 'wh.inventory'
+    _description = u'盘点单'
     _order = 'date DESC, id DESC'
 
     INVENTORY_STATE = [
@@ -187,7 +188,7 @@ class wh_inventory(models.Model):
 
     def get_line_detail(self):
         for inventory in self:
-            remaining_text = 'line.qty_remaining > 0'
+            remaining_text = 'line.qty_remaining != 0'
 
             sql_text = '''
                 SELECT wh.id as warehouse_id,
@@ -243,6 +244,7 @@ class wh_inventory(models.Model):
 
 class wh_inventory_line(models.Model):
     _name = 'wh.inventory.line'
+    _description = u'盘点单明细'
 
     LOT_TYPE = [
         ('out', u'出库'),

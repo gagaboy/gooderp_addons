@@ -10,6 +10,7 @@ env = Environment(loader=PackageLoader('odoo.addons.warehouse', 'html'), autoesc
 
 class wh_move_line(models.Model):
     _name = 'wh.move.line'
+    _description = u'移库单明细'
 
     _rec_name = 'note'
 
@@ -336,7 +337,6 @@ class wh_move_line(models.Model):
             self.uom_id = self.goods_id.uom_id
             self.uos_id = self.goods_id.uos_id
             self.attribute_id = False
-            self.cost_unit = self.tax_rate+100 and self.price_taxed / (1 + self.tax_rate * 0.01) or 0
 
             partner_id = self.env.context.get('default_partner')
             partner = self.env['partner'].browse(partner_id)

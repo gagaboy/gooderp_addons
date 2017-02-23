@@ -21,7 +21,16 @@ AVAILABLE_PRIORITIES = [
 
 class project(models.Model):
     _name = 'project'
+    _description = u'项目'
     _inherits = {'auxiliary.financing': 'auxiliary_id'}
+    _inherit = ['mail.thread']
+
+    @api.multi
+    def _compute_hours(self):
+        '''计算项目的实际工时'''
+        for project in self:
+            for task in project.task_ids:
+                project.hours += task.hours
 
     auxiliary_id = fields.Many2one(
         string=u'辅助核算',
@@ -48,9 +57,17 @@ class project(models.Model):
         inverse_name='project_id',
     )
 
+    plan_hours = fields.Float(u'计划工时',
+                              track_visibility='onchange')
+    hours = fields.Float(u'实际工时',
+                         compute=_compute_hours)
+    address = fields.Char(u'地址')
+    note = fields.Text(u'备注')
+
 
 class project_invoice(models.Model):
     _name = 'project.invoice'
+    _description = u'项目的发票'
 
     @api.one
     @api.depends('tax_rate', 'amount')
@@ -134,15 +151,15 @@ class project_invoice(models.Model):
 
 class task(models.Model):
     _name = 'task'
+    _description = u'任务'
     _inherit = ['mail.thread']
     _order = 'sequence, priority desc, id'
 
     @api.multi
     def _compute_hours(self):
-        '''计算任务的实际时间'''
+        '''计算任务的实际工时'''
         for task in self:
-            for line in self.env['timeline'].search(
-                                [('task_id', '=', task.id)]):
+            for line in task.timeline_ids:
                 task.hours += line.hours
 
     def _default_status_impl(self):
@@ -198,8 +215,8 @@ class task(models.Model):
         default=_default_status,
         track_visibility='onchange',
     )
-    plan_hours = fields.Float(u'计划时间')
-    hours = fields.Float(u'实际时间',
+    plan_hours = fields.Float(u'计划工时')
+    hours = fields.Float(u'实际工时',
                          compute=_compute_hours)
     sequence = fields.Integer(u'顺序')
     is_schedule = fields.Boolean(u'列入计划')
@@ -220,6 +237,7 @@ class task(models.Model):
 
 class task_status(models.Model):
     _name = 'task.status'
+    _description = u'任务阶段'
     _order = 'sequence, id'
     
     name = fields.Char(u'名称')
@@ -231,6 +249,7 @@ class task_status(models.Model):
 
 class timesheet(models.Model):
     _name = 'timesheet'
+    _description = u'今日工作日志'
 
     date = fields.Date(
         string=u'日期',
@@ -279,6 +298,7 @@ class timesheet(models.Model):
 
 class timeline(models.Model):
     _name = 'timeline'
+    _description = u'工作记录'
 
     timesheet_id = fields.Many2one(
         string=u'记录表',
