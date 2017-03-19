@@ -200,6 +200,11 @@ class buy_order(models.Model):
     receipt_count = fields.Integer(compute='_compute_receipt', string='Receptions Count', default=0)
     invoice_ids = fields.One2many('money.invoice', compute='_compute_invoice', string='Invoices')
     invoice_count = fields.Integer(compute='_compute_invoice', string='Invoices Count', default=0)
+    company_id = fields.Many2one(
+        'res.company',
+        string=u'公司',
+        change_default=True,
+        default=lambda self: self.env['res.company']._company_default_get())
 
     @api.onchange('discount_rate', 'line_ids')
     def onchange_discount_rate(self):
@@ -242,6 +247,8 @@ class buy_order(models.Model):
             }]
         return {
             'partner_id': self.partner_id.id,
+            'bank_name':self.partner_id.bank_name,
+            'bank_num':self.partner_id.bank_num,
             'date': fields.Date.context_today(self),
             'line_ids':
             [(0, 0, line) for line in money_lines],
@@ -564,6 +571,11 @@ class buy_order_line(models.Model):
     # TODO:放到单独模块中 sell_to_buy many2one 到sell.order
     origin = fields.Char(u'销售单号',
                          help=u'以销订购的销售订单号')
+    company_id = fields.Many2one(
+        'res.company',
+        string=u'公司',
+        change_default=True,
+        default=lambda self: self.env['res.company']._company_default_get())
 
     @api.onchange('goods_id', 'quantity')
     def onchange_goods_id(self):

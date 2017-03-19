@@ -97,6 +97,11 @@ class cost_order(models.Model):
     tax_amount = fields.Float(u'合计税额', store=True, readonly=True,
                           compute='_compute_amount', track_visibility='always',
                           digits=dp.get_precision('Amount'))
+    company_id = fields.Many2one(
+        'res.company',
+        string=u'公司',
+        change_default=True,
+        default=lambda self: self.env['res.company']._company_default_get())
     #pay_ids=fields.One2many("payment.plan","cost_id",string=u"付款计划", help=u'分批付款时使用付款计划')
 
 
@@ -147,9 +152,9 @@ class cost_order(models.Model):
                     'partner_id': self.partner_id.id,
                     'category_id': line.category_id.id,
                     'date': self.date,
-                    'amount': line.amount,
+                    'amount': line.subtotal,
                     'reconciled': 0,
-                    'to_reconcile': line.amount,
+                    'to_reconcile': line.subtotal,
                     'tax_amount': line.tax_amount,
                     'date_due': self.date,
                     'state': 'draft',
@@ -251,7 +256,7 @@ class cost_order_line(models.Model):
     category_id = fields.Many2one('core.category', u'类别',
                                   required=True,
                                   ondelete='restrict',
-                                  help=u'分类：其他支出')
+                                  help=u'分类：采购')
     amount = fields.Float(u'金额',
                           digits=dp.get_precision('Amount'),
                           help=u'金额  = 价税合计  - 税额')
@@ -263,3 +268,8 @@ class cost_order_line(models.Model):
                             help=u'含税单价 乘以 数量')
     note = fields.Char(u'备注',
                        help=u'本行备注')
+    company_id = fields.Many2one(
+        'res.company',
+        string=u'公司',
+        change_default=True,
+        default=lambda self: self.env['res.company']._company_default_get())

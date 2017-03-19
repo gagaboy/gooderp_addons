@@ -9,11 +9,11 @@
                         该模块实现了平均年限法的固定资产初始化，采购，变更，处理。
     ''',
     'version': '11.11',
-    'depends': ['finance', 'money'],
+    'depends': ['money'],
     'data': [
-        'view/asset.xml',
-        'view/asset_action.xml',
-        'view/asset_menu.xml',
+        'views/asset.xml',
+        'views/asset_action.xml',
+        'views/asset_menu.xml',
         'data/asset_data.xml',
         'security/ir.model.access.csv',
     ],

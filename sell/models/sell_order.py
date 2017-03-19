@@ -154,6 +154,11 @@ class sell_order(models.Model):
                                   store=True,
                                   readonly=True,
                                   help=u'外币币别')
+    company_id = fields.Many2one(
+        'res.company',
+        string=u'公司',
+        change_default=True,
+        default=lambda self: self.env['res.company']._company_default_get())
 
     @api.onchange('partner_id')
     def onchange_partner_id(self):
@@ -389,7 +394,7 @@ class sell_order_line(models.Model):
             self.tax_amount = self.subtotal / (100 + self.tax_rate) * self.tax_rate # 税额
             self.amount = self.subtotal - self.tax_amount # 金额
         else:
-            rate_silent = self.order_id.currency_id.rate or self.env.user.company_id.currency_id.rate
+            rate_silent = self.env['res.currency'].get_rate_silent(self.order_id.date, self.order_id.currency_id.id) or 0
             currency_amount = self.quantity * self.price_taxed - self.discount_amount
             self.price = self.price_taxed * rate_silent / (1 + self.tax_rate * 0.01)
             self.subtotal = (self.price_taxed * self.quantity - self.discount_amount) * rate_silent  # 价税合计
@@ -467,6 +472,11 @@ class sell_order_line(models.Model):
                             help=u'含税单价 乘以 数量')
     note = fields.Char(u'备注',
                        help=u'本行备注')
+    company_id = fields.Many2one(
+        'res.company',
+        string=u'公司',
+        change_default=True,
+        default=lambda self: self.env['res.company']._company_default_get())
 
     @api.onchange('goods_id')
     def onchange_warehouse_id(self):
