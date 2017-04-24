@@ -106,6 +106,10 @@ class buy_receipt(models.Model):
     voucher_id = fields.Many2one('voucher', u'入库凭证', readonly=True,
                                  help=u'审核时产生的入库凭证')
     origin_id = fields.Many2one('buy.receipt', u'来源单据')
+    currency_id = fields.Many2one('res.currency',
+                                  u'外币币别',
+                                  readonly=True,
+                                  help=u'外币币别')
 
     def _compute_total(self, line_ids):
         return sum(line.subtotal for line in line_ids)
@@ -158,9 +162,8 @@ class buy_receipt(models.Model):
         for receipt in self:
             if receipt.state == 'done':
                 raise UserError(u'不能删除已审核的单据')
-            receipt.buy_move_id.unlink()
 
-        return super(buy_receipt, self).unlink()
+        return receipt.buy_move_id.unlink()
 
     @api.one
     def _wrong_receipt_done(self):
@@ -231,7 +234,9 @@ class buy_receipt(models.Model):
             'to_reconcile': amount,
             'tax_amount': tax_amount,
             'date_due': self.date_due,
-            'state': 'draft'
+            'state': 'draft',
+            'currency_id': self.currency_id.id,
+            'note': self.note,
         }
 
     def _receipt_make_invoice(self):
@@ -290,18 +295,31 @@ class buy_receipt(models.Model):
             'reconciled': this_reconcile,
             'to_reconcile': amount,
             'state': 'draft',
-            'origin_name': self.name})
+            'origin_name': self.name,
+            'note': self.note,
+        })
         return money_order
 
-    def _create_voucher_line(self, account_id, debit, credit, voucher_id, goods_id):
+    def _create_voucher_line(self, account_id, debit, credit, voucher_id, goods_id, goods_qty):
         '''返回voucher line'''
+        rate_silent = currency_amount = 0
+        currency = self.currency_id != self.env.user.company_id.currency_id and self.currency_id.id or False
+        if self.currency_id and self.currency_id != self.env.user.company_id.currency_id:
+            rate_silent = self.env['res.currency'].get_rate_silent(self.date, self.currency_id.id)
+            currency_amount = debit or credit
+            debit = debit * (rate_silent or 1)
+            credit = credit * (rate_silent or 1)
         voucher = self.env['voucher.line'].create({
-            'name': self.name,
+            'name': u'%s %s' % (self.name, self.note or ''),
             'account_id': account_id and account_id.id,
             'debit': debit,
             'credit': credit,
             'voucher_id': voucher_id and voucher_id.id,
             'goods_id': goods_id and goods_id.id,
+            'goods_qty': goods_qty,
+            'currency_id': currency,
+            'currency_amount': currency_amount,
+            'rate_silent': rate_silent,
         })
         return voucher
 
@@ -323,27 +341,27 @@ class buy_receipt(models.Model):
                 if line.amount:
                     # 借方明细
                     self._create_voucher_line(line.goods_id.category_id.account_id,
-                                              line.amount, 0, vouch_id, line.goods_id)
+                                              line.amount, 0, vouch_id, line.goods_id, line.goods_qty)
                 sum_amount += line.amount
 
             if sum_amount:
                 category_expense = self.env.ref('money.core_category_purchase')
                 # 贷方明细
                 self._create_voucher_line(category_expense.account_id,
-                                          0, sum_amount, vouch_id, False)
+                                          0, sum_amount, vouch_id, False, 0)
         if self.is_return:
             for line in self.line_out_ids:
                 if line.amount:
                     # 借方明细
                     self._create_voucher_line(line.goods_id.category_id.account_id,
-                                              -line.amount, 0, vouch_id, line.goods_id)
+                                              -line.amount, 0, vouch_id, line.goods_id, line.goods_qty)
                     sum_amount += line.amount
 
             if sum_amount:
                 category_expense = self.env.ref('money.core_category_purchase')
                 # 贷方明细
                 self._create_voucher_line(category_expense.account_id,
-                                          0, -sum_amount, vouch_id, False)
+                                          0, -sum_amount, vouch_id, False, 0)
 
         self.voucher_id = vouch_id
         if len(self.voucher_id.line_ids) > 0:
@@ -436,7 +454,7 @@ class buy_receipt(models.Model):
             ('state', '=', 'draft')
         ])
         if return_order_draft:
-            raise UserError(u'销售出库单存在草稿状态的退货单！')
+            raise UserError(u'采购入库单存在草稿状态的退货单！')
 
         return_order = self.search([
             ('is_return', '=', True),

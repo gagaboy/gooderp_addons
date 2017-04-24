@@ -62,7 +62,7 @@
                             <t t-esc="column.string"/>
                         </th>
                     </t>
-					<th t-if="options.deletable" class='oe_list_record_copy' width="13px"/>
+					<th t-if="options.deletable" class='oe_list_record_copy' width="13px" rowspan="2" />
                     <th t-if="options.selectable" class="o_list_record_selector" rowspan="2" colspan="1">
                         <div class="o_checkbox" >
                             <input type="checkbox"/><span/>
@@ -94,4 +94,32 @@
 			<td t-if="options.deletable" class='oe_list_record_copy' width="13px"/>
 		</t>
     </t>
+	<t t-name="FieldPdfViewer">
+        <div class="o_form_field_pdfviewer">
+            <div t-if="!widget.get('effective_readonly')" class="o_form_pdf_controls mt8">
+                <span class="o_form_binary_progress">Uploading...</span>
+                <button type="button" class="btn btn-sm btn-primary o_select_file_button" title="Select">Upload your file</button>
+                <button class="btn btn-sm btn-default fa fa-pencil o_select_file_button" title="Select" type="button"></button>
+                <button class="btn btn-sm btn-default fa fa-trash-o o_clear_file_button" title="Clear" type="button"></button>
+            </div>
+            <iframe class="o_pdfview_iframe o_form_field_pdfviewer"/>
+            <t t-call="HiddenInputPDFFile">
+                <t t-set="fileupload_id" t-value="widget.fileupload_id"/>
+                <t t-set="fileupload_style" t-translation="off">overflow-x: hidden</t>
+            </t>
+        </div>
+    </t>
+	<t t-extend="HiddenInputFile" t-name="HiddenInputPDFFile">
+        <t t-jquery="input[type='file']:first" t-operation="replace">
+            <input type="file" class="o_form_input_file" name="ufile" accept="application/pdf" />
+        </t>
+    </t>
+	<t t-extend="FieldMany2ManyTag">
+		<t t-jquery="span:first" t-operation="replace">
+			<span t-attf-class="badge dropdown o_tag_color_#{el.color || 6}" t-att-data-color="el.color || 10" t-att-data-index="el_index" t-att-data-id="el.id">
+				<span class="o_badge_text" t-attf-title="#{el['display_name']}"><t t-raw="el['display_name']"/></span>
+				<span t-if="!readonly" class="fa fa-times o_delete"/>
+			</span>
+		</t>
+	</t>
  </template>

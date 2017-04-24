@@ -44,6 +44,14 @@ class sell_adjust(models.Model):
                              help=u'变更单审核状态')
     note = fields.Text(u'备注',
                        help=u'单据备注')
+    user_id = fields.Many2one(
+        'res.users',
+        u'经办人',
+        ondelete='restrict',
+        states=READONLY_STATES,
+        default=lambda self: self.env.user,
+        help=u'单据经办人',
+    )
     company_id = fields.Many2one(
         'res.company',
         string=u'公司',
@@ -187,10 +195,10 @@ class sell_adjust_line(models.Model):
                          compute=_compute_all_amount,
                          inverse=_inverse_price,
                          store=True,
-                         digits=dp.get_precision('Amount'),
+                         digits=dp.get_precision('Price'),
                          help=u'不含税单价，由含税单价计算得出')
     price_taxed = fields.Float(u'含税单价',
-                               digits=dp.get_precision('Amount'),
+                               digits=dp.get_precision('Price'),
                                help=u'含税单价，取自商品零售价')
     discount_rate = fields.Float(u'折扣率%',
                          help=u'折扣率')

@@ -278,6 +278,12 @@
             <field name='costs_types'>debt</field>
             <field name='balance_directions'>out</field>
         </record>
+        <record id="small_business_chart2211009" model='finance.account'>
+            <field name='code'>2211009</field>
+            <field name='name'>应付职工薪酬-住房公积金</field>
+            <field name='costs_types'>debt</field>
+            <field name='balance_directions'>out</field>
+        </record>
 
         <record id="small_business_chart2221001001" model='finance.account'>
             <field name='code'>2221001001</field>
@@ -564,37 +570,37 @@
         <record id="small_business_chart4001001" model='finance.account'>
             <field name='code'>4001001</field>
             <field name='name'>生产成本-基本生产成本</field>
-            <field name='costs_types'>out</field>
+            <field name='costs_types'>cost</field>
             <field name='balance_directions'>in</field>
         </record>
         <record id="small_business_chart4001002" model='finance.account'>
             <field name='code'>4001002</field>
             <field name='name'>生产成本-辅助生产成本</field>
-            <field name='costs_types'>out</field>
+            <field name='costs_types'>cost</field>
             <field name='balance_directions'>in</field>
         </record>
         <record id="small_business_chart4101" model='finance.account'>
             <field name='code'>4101</field>
             <field name='name'>制造费用</field>
-            <field name='costs_types'>out</field>
+            <field name='costs_types'>cost</field>
             <field name='balance_directions'>in</field>
         </record>
         <record id="small_business_chart4301" model='finance.account'>
             <field name='code'>4301</field>
             <field name='name'>研发支出</field>
-            <field name='costs_types'>out</field>
+            <field name='costs_types'>cost</field>
             <field name='balance_directions'>in</field>
         </record>
         <record id="small_business_chart4401" model='finance.account'>
             <field name='code'>4401</field>
             <field name='name'>工程施工</field>
-            <field name='costs_types'>out</field>
+            <field name='costs_types'>cost</field>
             <field name='balance_directions'>in</field>
         </record>
         <record id="small_business_chart4403" model='finance.account'>
             <field name='code'>4403</field>
             <field name='name'>机械作业</field>
-            <field name='costs_types'>out</field>
+            <field name='costs_types'>cost</field>
             <field name='balance_directions'>in</field>
         </record>
         <!-- 损益类 -->
@@ -890,6 +896,42 @@
         <record id='small_business_chart5602021' model='finance.account'>
             <field name='code'>5602021</field>
             <field name='name'>管理费用-其他费用</field>
+            <field name='costs_types'>out</field>
+            <field name='balance_directions'>in</field>
+        </record>
+        <record id='management_endowment' model='finance.account'>
+            <field name='code'>5602023</field>
+            <field name='name'>管理费用-养老保险</field>
+            <field name='costs_types'>out</field>
+            <field name='balance_directions'>in</field>
+        </record>
+        <record id='management_health' model='finance.account'>
+            <field name='code'>5602024</field>
+            <field name='name'>管理费用-医疗保险</field>
+            <field name='costs_types'>out</field>
+            <field name='balance_directions'>in</field>
+        </record>
+        <record id='management_unemployment' model='finance.account'>
+            <field name='code'>5602025</field>
+            <field name='name'>管理费用-失业保险</field>
+            <field name='costs_types'>out</field>
+            <field name='balance_directions'>in</field>
+        </record>
+        <record id='management_injury' model='finance.account'>
+            <field name='code'>5602026</field>
+            <field name='name'>管理费用-工伤保险</field>
+            <field name='costs_types'>out</field>
+            <field name='balance_directions'>in</field>
+        </record>
+        <record id='management_maternity' model='finance.account'>
+            <field name='code'>5602027</field>
+            <field name='name'>管理费用-生育保险</field>
+            <field name='costs_types'>out</field>
+            <field name='balance_directions'>in</field>
+        </record>
+        <record id='management_housing_fund' model='finance.account'>
+            <field name='code'>5602028</field>
+            <field name='name'>管理费用-住房公积金</field>
             <field name='costs_types'>out</field>
             <field name='balance_directions'>in</field>
         </record>
@@ -1336,6 +1378,26 @@
 			<field name="account_id" ref="small_business_chart5603003"/>
             <field name='note'>由系统创建</field>
 		</record>
+
+        <!--核算类别-->
+        <!-- 销售发货 借方科目：主营业务成本-->
+        <record id="categ_sell_goods" model="core.category">
+            <field name="name">销售发货</field>
+            <field name="type">finance</field>
+            <field name="account_id" ref="finance.account_cost"/>
+        </record>
+        <!-- 组装单、拆卸单 借方科目：生产成本-基本生产成本 -->
+        <record id="categ_ass_disass" model="core.category">
+            <field name="name">生产</field>
+            <field name="type">finance</field>
+            <field name="account_id" ref="finance.small_business_chart4001001"/>
+        </record>
+        <!-- 委外 借方科目： -->
+        <record id="categ_outsource" model="core.category">
+            <field name="name">委外</field>
+            <field name="type">finance</field>
+            <field name="account_id" ref="finance.small_business_chart1408"/>
+        </record>
 
     </data>
 </openerp>

@@ -16,6 +16,7 @@ odoo.define('home_page', function (require) {
             'click .oe_quick_link': 'on_click_quick',
             'click .oe_main_link': 'on_click_main',
         },
+
         /**
          *把后端传进来的action的数据进行还原 并且
          * 替换掉tree为list 因为在js里面 tree表示为list
@@ -23,10 +24,7 @@ odoo.define('home_page', function (require) {
         get_action_vals: function (vals) {
             vals[1] = vals[1].replace('tree','list');
             var view_mode_list = vals[1].split(',')
-            var views = [];
-            for(var i=0;i<view_mode_list.length;i++){
-                views.push([false, view_mode_list[i]])
-            }
+            var views = this.constract_views(view_mode_list, vals);
             return {
                 type: 'ir.actions.act_window',
                 res_model: vals[2],
@@ -37,6 +35,22 @@ odoo.define('home_page', function (require) {
                 name: vals[6],
                 target: vals[7],
             };
+        },
+        /***
+         *针对传入的
+         */
+        constract_views: function (view_mode_list, vals) {
+            var views = []
+            if(typeof vals[5]=='object'){
+                for(var i=0;i < (vals[5]).length;i++){
+                    views.push([vals[5][i], view_mode_list[i]])
+                }
+            }else{
+                for(var i=0;i < view_mode_list.length;i++){
+                    views.push([false, view_mode_list[i]])
+                }
+            }
+            return views
         },
         /***
          *以下三个on_clik 是点击事件，因为取值定位有差别所以要用三个方法
@@ -140,14 +154,14 @@ odoo.define('home_page', function (require) {
             var self = this;
             var result_quick = self.result_quick;
             for (var i = 0; i < result_quick.length; i++) {
-                var left_big_html_str = "<div class='col-xs-12 col-md-3 right_small_div_" + i + "'><a><h3>" +
-                    (result_quick[i][0].split(';'))[1] + "</h3></a></div>"
+                var left_big_html_str = "<div class='col-xs-12 col-md-3 right_small_div_" + i + "'><h3>" +
+                    (result_quick[i][0].split(';'))[1] + "</h3><ul class='list-group right_small_ul_"+i+"'></ul></div>"
                 self.$el.find('.right_div').append(left_big_html_str);
                 for (var j = 0; j < result_quick[i][1].length; j++) {
-                    var left_html_str = $(" <a><li  class='text-muted oe_p oe_quick_link' oe_top_link_i='" + i + "' " +
+                    var left_html_str = $("<li  class='list-group-item oe_p oe_quick_link' oe_top_link_i='" + i + "' " +
                         " oe_top_link_j='" + j+ "' id='" + index_last + "'>" +
-                        "<p>" + result_quick[i][1][j][6] + "</p></li></a>");
-                    self.$el.find('.right_small_div_' + i).append(left_html_str);
+                        "<a><p>" + result_quick[i][1][j][6] + "</p></a></li>");
+                    self.$el.find('.right_small_ul_' + i).append(left_html_str);
                     index_last++;
                 }
             }

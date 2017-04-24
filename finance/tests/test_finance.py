@@ -38,6 +38,44 @@ class test_voucher(TransactionCase):
         with self.assertRaises(UserError):
             voucher.voucher_draft()
 
+    def test_voucher_done_costs_types_out(self):
+        '''费用类科目只能在借方记账'''
+        voucher = self.env['voucher'].create({
+            'date': '2017-01-01',
+            'line_ids': [(0, 0, {
+                'name': u'收利息', # 贷方行
+                'account_id': self.env.ref('finance.small_business_chart5603002').id,
+                'debit': 0,
+                'credit': 1.0,
+            }),
+                (0, 0, {
+                    'name': u'收利息', # 借方行
+                    'account_id': self.env.ref('finance.account_bank').id,
+                    'debit': 1.0,
+                    'credit': 0,
+              })]
+        })
+        voucher.voucher_done()
+
+    def test_voucher_done_costs_types_in(self):
+        '''收入类科目只能在贷方记账'''
+        voucher = self.env['voucher'].create({
+            'date': '2017-01-01',
+            'line_ids': [(0, 0, {
+                'name': u'退款给客户', # 贷方行
+                'account_id': self.env.ref('finance.account_bank').id,
+                'debit': 0,
+                'credit': 50.0,
+            }),
+                (0, 0, {
+                    'name': u'退款给客户', # 借方行
+                    'account_id': self.env.ref('finance.account_income').id,
+                    'debit': 50.0,
+                    'credit': 0,
+              })]
+        })
+        voucher.voucher_done()
+
     def test_line_unlink(self):
         '''测试可正常删除未审核的凭证行'''
         voucher = self.env.ref('finance.voucher_1')
@@ -232,6 +270,18 @@ class test_finance_account(TransactionCase):
         real_name = '%s %s' % (self.cash.code, self.cash.name)
         self.assertTrue(name[0][1] == real_name)
 
+    # def test_name_get_in_voucher(self):
+    #     """仅在凭证界面选择科目时显示出余额"""
+    #     voucher = self.env.ref('finance.voucher_1')
+    #     self.env['voucher.line'].create({
+    #         'voucher_id': voucher.id,
+    #         'name': u'测试科目显示出余额',
+    #         'account_id': self.cash.with_context({'show_balance': True}).id,    # 给该字段传context没有成功
+    #     })
+    #     name = self.cash.name_get()
+    #     real_name = '%s %s %s' % (self.cash.code, self.cash.name, self.cash.balance)
+    #     self.assertTrue(name[0][1] == real_name)
+
     def test_name_search(self):
         '''会计科目按名字和编号搜索'''
         result = self.env['finance.account'].name_search('库存现金')
@@ -247,6 +297,12 @@ class test_finance_account(TransactionCase):
     def test_get_max_code_account(self):
         account = self.env['finance.account']
         account.get_max_code_account()
+
+    def test_compute_balance(self):
+        """计算会计科目的当前余额"""
+        self.cash.compute_balance()
+        self.assertEqual(self.cash.balance, 0)
+
 
 class test_voucher_template_wizard(TransactionCase):
     def setUp(self):

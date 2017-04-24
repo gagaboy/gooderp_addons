@@ -81,10 +81,14 @@ class sell_order(models.Model):
                                  help=u'联系地址')
     mobile = fields.Char(u'手机', states=READONLY_STATES,
                                  help=u'联系手机')
-    staff_id = fields.Many2one('staff', u'销售员',
-                            ondelete='restrict', states=READONLY_STATES,
-                            default=lambda self: self.env.user.employee_ids and self.env.user.employee_ids[0],
-                                 help=u'单据负责人')
+    user_id = fields.Many2one(
+        'res.users',
+        u'销售员',
+        ondelete='restrict',
+        states=READONLY_STATES,
+        default=lambda self: self.env.user,
+        help=u'单据经办人',
+    )
     date = fields.Date(u'单据日期',
                        required=True,
                        states=READONLY_STATES,
@@ -288,6 +292,7 @@ class sell_order(models.Model):
             'uos_id': line.goods_id.uos_id.id,
             'goods_qty': qty,
             'uom_id': line.uom_id.id,
+            'cost_unit': line.goods_id.cost,
             'price_taxed': line.price_taxed,
             'discount_rate': line.discount_rate,
             'discount_amount': discount_amount,
@@ -310,7 +315,7 @@ class sell_order(models.Model):
             'partner_id': self.partner_id.id,
             'warehouse_id': warehouse.id,
             'warehouse_dest_id': warehouse_dest.id,
-            'staff_id': self.staff_id.id,
+            'user_id': self.user_id.id,
             'date': self.delivery_date,
             'order_id': self.id,
             'origin': 'sell.delivery',
@@ -417,7 +422,7 @@ class sell_order_line(models.Model):
                                help=u'关联订单的编号')
     currency_amount = fields.Float(u'外币金额', compute=_compute_all_amount,
                           store=True,
-                          digits=dp.get_precision(u'金额'),
+                          digits=dp.get_precision('Amount'),
                           help=u'外币金额')
     goods_id = fields.Many2one('goods',
                                u'商品',
@@ -444,10 +449,10 @@ class sell_order_line(models.Model):
                          compute=_compute_all_amount,
                          inverse=_inverse_price,
                          store=True,
-                         digits=(12, 6),
+                         digits=dp.get_precision('Price'),
                          help=u'不含税单价，由含税单价计算得出')
     price_taxed = fields.Float(u'含税单价',
-                               digits=(12, 6),
+                               digits=dp.get_precision('Price'),
                                help=u'含税单价，取商品零售价')
     discount_rate = fields.Float(u'折扣率%',
                                    help=u'折扣率')

@@ -23,6 +23,10 @@ MONTH_SELECTION = [
     ('11', u'11'),
     ('12', u'12')]
 
+# 字段只读状态
+READONLY_STATES = {
+        'done': [('readonly', True)],
+    }
 
 class voucher(models.Model):
     '''新建凭证'''
@@ -54,14 +58,15 @@ class voucher(models.Model):
         'document.word', u'凭证字', ondelete='restrict', required=True,
         default=lambda self: self.env.ref('finance.document_word_1'))
     date = fields.Date(u'凭证日期', required=True, default=_default_voucher_date,
+                       states=READONLY_STATES,
                        track_visibility='always', help=u'本张凭证创建的时间', copy=False)
     name = fields.Char(u'凭证号', track_visibility='always', copy=False)
-    att_count = fields.Integer(u'附单据', default=1, help=u'原始凭证的张数')
+    att_count = fields.Integer(u'附单据', default=1, help=u'原始凭证的张数', states=READONLY_STATES)
     period_id = fields.Many2one(
         'finance.period',
         u'会计期间',
         compute='_compute_period_id', ondelete='restrict', store=True, help=u'本张凭证发生日期对应的，会计期间')
-    line_ids = fields.One2many('voucher.line', 'voucher_id', u'凭证明细', copy=True)
+    line_ids = fields.One2many('voucher.line', 'voucher_id', u'凭证明细', copy=True, states=READONLY_STATES,)
     amount_text = fields.Float(u'总计', compute='_compute_amount', store=True,
                                track_visibility='always',help=u'凭证金额')
     state = fields.Selection([('draft', u'草稿'),
@@ -102,6 +107,18 @@ class voucher(models.Model):
             raise ValidationError(u'借贷方不平!\n 借方合计:%s 贷方合计:%s' % (debit_sum, credit_sum))
 
         self.state = 'done'
+        if self.is_checkout:   # 月结凭证不做反转
+            return True
+        for line in self.line_ids:
+            if line.account_id.costs_types == 'out' and line.credit:
+                # 费用类科目只能在借方记账,比如银行利息收入
+                line.debit = -line.credit
+                line.credit = 0
+            if line.account_id.costs_types == 'in' and line.debit:
+                # 收入类科目只能在贷方记账,比如退款给客户的情况
+                line.credit = -line.debit
+                line.debit = 0
+        
 
     @api.one
     def voucher_draft(self):
@@ -184,6 +201,8 @@ class voucher_line(models.Model):
     currency_id = fields.Many2one('res.currency', u'外币币别', ondelete='restrict')
     rate_silent = fields.Float(u'汇率')
     period_id = fields.Many2one(related='voucher_id.period_id', relation='finance.period', string=u'凭证期间', store=True)
+    goods_qty = fields.Float(u'数量',
+                             digits=dp.get_precision('Quantity'))
     goods_id = fields.Many2one('goods', u'商品', ondelete='restrict')
     auxiliary_id = fields.Many2one(
         'auxiliary.financing', u'辅助核算', help=u'辅助核算是对账务处理的一种补充,即实现更广泛的账务处理,\
@@ -306,6 +325,16 @@ class finance_period(models.Model):
         if not period_id:
             return self.create({'year': current_date[0:4],
                                 'month': str(int(current_date[5:7])), })
+    @api.model
+    def get_init_period(self):
+       '''系统启用的期间'''
+       start_date = self.env.ref('base.main_company').start_date
+       period_id = self.search([
+            ('year', '=', start_date[0:4]),
+            ('month', '=', int(start_date[5:7]))
+        ])
+       return period_id
+
     @api.multi
     def get_date_now_period_id(self):
         """
@@ -388,6 +417,17 @@ class finance_account(models.Model):
     _order = "code"
     _description = u'会计科目'
 
+    @api.one
+    def compute_balance(self):
+        """
+        计算会计科目的当前余额
+        :return:
+        """
+        lines = self.env['voucher.line'].search(
+            [('account_id', '=', self.id),
+             ('voucher_id.state', '=', 'done')])
+        self.balance = sum((line.debit - line.credit) for line in lines)
+
     name = fields.Char(u'名称', required="1")
     code = fields.Char(u'编码', required="1")
     balance_directions = fields.Selection(BALANCE_DIRECTIONS_TYPE, u'余额方向', required="1", help=u'根据科目的类型，判断余额方向是借方或者贷方！')
@@ -404,7 +444,8 @@ class finance_account(models.Model):
         ('debt', u'负债'),
         ('equity', u'所有者权益'),
         ('in', u'收入类'),
-        ('out', u'费用类')
+        ('out', u'费用类'),
+        ('cost', u'成本类'),
     ], u'类型', required="1")
     currency_id = fields.Many2one('res.currency', u'外币币别')
     exchange = fields.Boolean(u'是否期末调汇')
@@ -413,6 +454,12 @@ class finance_account(models.Model):
         string=u'公司',
         change_default=True,
         default=lambda self: self.env['res.company']._company_default_get())
+    balance = fields.Float(u'当前余额',
+                           compute='compute_balance',
+                           store=True,
+                           digits=dp.get_precision('Amount'),
+                           help=u'科目的当前余额',
+                           )
 
     _sql_constraints = [
         ('name_uniq', 'unique(name)', u'科目名称必须唯一。'),
@@ -423,12 +470,14 @@ class finance_account(models.Model):
     @api.depends('name', 'code')
     def name_get(self):
         """
-        在其他model中用到account时在页面显示 code name 如：2202 应付账款 （更有利于会计记账）
+        在其他model中用到account时在页面显示 code name balance如：2202 应付账款 当前余额（更有利于会计记账）
         :return:
         """
         result = []
         for line in self:
             account_name = line.code + ' ' + line.name
+            if line.env.context.get('show_balance'):
+                account_name += ' ' + str(line.balance)
             result.append((line.id, account_name))
         return result
 

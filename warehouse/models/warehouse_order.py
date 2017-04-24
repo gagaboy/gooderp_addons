@@ -7,6 +7,7 @@ from odoo import models, fields, api
 class wh_out(models.Model):
     _name = 'wh.out'
     _description = u'其他出库单'
+    _inherit = ['mail.thread', 'scan.barcode']
     _order = 'date DESC, id DESC'
 
     _inherits = {
@@ -25,21 +26,25 @@ class wh_out(models.Model):
     amount_total = fields.Float(compute='_get_amount_total', string=u'合计成本金额',
                                 store=True, readonly=True, digits=dp.get_precision('Amount'),
                                 help=u'该出库单的出库金额总和')
-
+    voucher_id = fields.Many2one('voucher', u'出库凭证',
+                                 readonly=True,
+                                 help=u'该出库单的审核后生成的出库凭证')
     @api.multi
-    @inherits(res_back=False)
+    @inherits_after()
     def approve_order(self):
+        self.create_voucher()
         return True
 
     @api.multi
     @inherits()
     def cancel_approved_order(self):
+        self.delete_voucher()
         return True
 
     @api.multi
-    @inherits_after()
+    @inherits()
     def unlink(self):
-        return super(wh_out, self).unlink()
+        return self.move_id.unlink()
 
     @api.one
     @api.depends('line_out_ids.cost')
@@ -70,10 +75,57 @@ class wh_out(models.Model):
         self.with_context({'wh_in_line_ids': [line.id for line in
                                               auto_in.line_in_ids]}).approve_order()
 
+    @api.one
+    def create_voucher(self):
+        '''
+        其他出库单生成出库凭证
+        借：如果出库类型为盘亏，取科目 1901 待处理财产损益；如果为其他，取核算类别的会计科目
+        贷：库存商品（商品分类上会计科目）
+        '''
+        voucher = self.env['voucher'].create({'date': self.date})
+        credit_sum = 0 # 贷方之和
+        for line in self.line_out_ids:
+            if line.cost:   # 贷方行（多行）
+                self.env['voucher.line'].create({
+                    'name': u'%s %s' % (self.name, self.note or ''),
+                    'account_id': line.goods_id.category_id.account_id.id,
+                    'credit': line.cost,
+                    'voucher_id': voucher.id,
+                    'goods_id': line.goods_id.id,
+                    'goods_qty': line.goods_qty,
+                })
+            credit_sum += line.cost
+        account = self.type == 'inventory' \
+                  and self.env.ref('finance.small_business_chart1901') \
+                  or self.finance_category_id.account_id
+        if credit_sum:  # 借方行（汇总一行）
+            self.env['voucher.line'].create({
+                'name': u'%s %s' % (self.name, self.note or ''),
+                'account_id': account.id,
+                'debit': credit_sum,
+                'voucher_id': voucher.id,
+            })
+        self.voucher_id = voucher
+        if len(self.voucher_id.line_ids) > 0:
+            self.voucher_id.voucher_done()
+        else:
+            self.voucher_id.unlink()
+        return voucher
+
+    @api.one
+    def delete_voucher(self):
+        # 反审核其他出库单时删除对应的出库凭证
+        voucher, self.voucher_id = self.voucher_id, False
+        if voucher.state == 'done':
+            voucher.voucher_draft()
+
+        voucher.unlink()
+
 
 class wh_in(models.Model):
     _name = 'wh.in'
     _description = u'其他入库单'
+    _inherit = ['mail.thread']
     _order = 'date DESC, id DESC'
 
     _inherits = {
@@ -111,9 +163,9 @@ class wh_in(models.Model):
         return True
 
     @api.multi
-    @inherits_after()
+    @inherits()
     def unlink(self):
-        return super(wh_in, self).unlink()
+        return self.move_id.unlink()
 
     @api.one
     @api.depends('line_in_ids.cost')
@@ -140,7 +192,7 @@ class wh_in(models.Model):
         '''
         借：商品分类对应的会计科目 一般是库存商品
         贷：如果入库类型为盘盈，取科目 1901 待处理财产损益（暂时写死）
-        如果入库类型为其他，取科目 5051 其他业务收入
+        如果入库类型为其他，取核算类别的会计科目
         '''
 
         # 初始化单的话，先找是否有初始化凭证，没有则新建一个
@@ -157,22 +209,25 @@ class wh_in(models.Model):
             init_obj = self.is_init and 'init_warehouse - %s' % (self.id) or ''
             if line.cost:
                 self.env['voucher.line'].create({
-                    'name': self.name,
+                    'name': u'%s %s' % (self.name, self.note or ''),
                     'account_id': line.goods_id.category_id.account_id.id,
                     'debit': line.cost,
                     'voucher_id': vouch_id.id,
                     'goods_id': line.goods_id.id,
+                    'goods_qty': line.goods_qty,
                     'init_obj': init_obj,
                 })
             debit_sum += line.cost
 
-        # 贷方科目： 主营业务成本
-        account = self.env.ref('finance.account_cost')
+        # 贷方科目： 如果是盘盈则取主营业务成本，否则取核算类别上的科目
+        account = self.type == 'inventory' \
+                  and self.env.ref('finance.small_business_chart1901') \
+                  or self.finance_category_id.account_id
 
         if not self.is_init:
             if debit_sum:
                 self.env['voucher.line'].create({
-                    'name': self.name,
+                    'name': u'%s %s' % (self.name, self.note or ''),
                     'account_id': account.id,
                     'credit': debit_sum,
                     'voucher_id': vouch_id.id,
@@ -207,6 +262,7 @@ class wh_in(models.Model):
 class wh_internal(models.Model):
     _name = 'wh.internal'
     _description = u'内部调拨单'
+    _inherit = ['mail.thread']
     _order = 'date DESC, id DESC'
 
     _inherits = {
@@ -244,9 +300,9 @@ class wh_internal(models.Model):
         return True
 
     @api.multi
-    @inherits_after()
+    @inherits()
     def unlink(self):
-        return super(wh_internal, self).unlink()
+        return self.move_id.unlink()
 
     @api.one
     @api.depends('line_out_ids.cost')

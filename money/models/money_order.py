@@ -23,11 +23,13 @@ from odoo.exceptions import UserError, ValidationError
 import odoo.addons.decimal_precision as dp
 from odoo import fields, models, api
 from odoo.tools import float_compare, float_is_zero
+from datetime import datetime
 
 
 class money_order(models.Model):
     _name = 'money.order'
     _description = u"收付款单"
+    _inherit = ['mail.thread']
 
     TYPE_SELECTION = [
         ('pay', u'付款'),
@@ -157,7 +159,7 @@ class money_order(models.Model):
                                    store=True, readonly=True,
                                    help=u'根据收付款单行金额总和，原始单据行金额总和及折扣额计算得来的预收/预付款，'
                                         u'值>=0')
-    to_reconcile = fields.Float(string=u'未核销预收款',
+    to_reconcile = fields.Float(string=u'未核销预收/付款',
                                 digits=dp.get_precision('Amount'),
                             help=u'未核销的预收/预付款金额')
     reconciled = fields.Float(string=u'已核销预收款',
@@ -379,7 +381,13 @@ class money_order_line(models.Model):
 class money_invoice(models.Model):
     _name = 'money.invoice'
     _description = u'结算单'
-    # _rec_name = 'bill_number'
+
+    @api.model
+    def _get_category_id(self):
+        cate_type = self.env.context.get('type')
+        if cate_type:
+            return self.env['core.category'].search([('type','=',cate_type)])[0]
+        return False
 
     @api.multi
     def name_get(self):
@@ -393,26 +401,40 @@ class money_invoice(models.Model):
                 res.append((invoice.id, invoice.bill_number and invoice.bill_number or invoice.name))
         return res
 
+    @api.one
+    @api.depends('date_due', 'to_reconcile')
+    def compute_overdue(self):
+        """
+        计算逾期天数： 当前日期 - 到期日
+        计算逾期金额： 逾期时等于未核销金额，否则为0
+        :return: 逾期天数
+        """
+        d1 = datetime.strptime(fields.Date.context_today(self), '%Y-%m-%d')
+        d2 = self.date_due and datetime.strptime(self.date_due, '%Y-%m-%d') or d1
+        self.overdue_days = (d1 - d2).days
+        self.overdue_amount = self.overdue_days > 0 and self.to_reconcile or 0.0
+
     state = fields.Selection([
                           ('draft', u'草稿'),
                           ('done', u'完成')
-                          ], string=u'状态', readonly=True,
+                          ], string=u'状态', 
                           default='draft', copy=False,
                         help=u'结算单状态标识，新建时状态为草稿;审核后状态为完成')
     partner_id = fields.Many2one('partner', string=u'业务伙伴',
-                                 required=True, readonly=True,
+                                 required=True,
                                  ondelete='restrict',
                                  help=u'该单据对应的业务伙伴')
-    name = fields.Char(string=u'订单编号', copy=False,
+    name = fields.Char(string=u'业务单据编号', copy=False,
                        readonly=True, required=True,
                        help=u'该结算单编号，取自生成结算单的采购入库单和销售入库单')
     category_id = fields.Many2one('core.category', string=u'类别',
-                                  readonly=True, ondelete='restrict',
+                                  ondelete='restrict',
+                                  default=_get_category_id,
                                   help=u'结算单类别：采购 或者 销售等')
-    date = fields.Date(string=u'单据日期', readonly=True,
+    date = fields.Date(string=u'单据日期',required=True,
                        default=lambda self: fields.Date.context_today(self),
                        help=u'单据创建日期')
-    amount = fields.Float(string=u'单据金额', readonly=True,
+    amount = fields.Float(string=u'单据金额',
                           digits=dp.get_precision('Amount'),
                           help=u'原始单据对应金额')
     reconciled = fields.Float(string=u'已核销金额', readonly=True,
@@ -421,7 +443,7 @@ class money_invoice(models.Model):
     to_reconcile = fields.Float(string=u'未核销金额', readonly=True,
                                 digits=dp.get_precision('Amount'),
                                 help=u'原始单据未核销掉的金额')
-    tax_amount = fields.Float(u'税额', readonly=True,
+    tax_amount = fields.Float(u'税额', 
                               digits=dp.get_precision('Amount'),
                               help=u'对应税额')
 
@@ -429,7 +451,7 @@ class money_invoice(models.Model):
                                    help=u'辅助核算')
     date_due = fields.Date(string=u'到期日',
                            help=u'结算单的到期日')
-    currency_id = fields.Many2one('res.currency', u'外币币别', readonly=True,
+    currency_id = fields.Many2one('res.currency', u'外币币别',
                                   help=u'原始单据对应的外币币别')
     bill_number = fields.Char(u'发票号',
                               help=u'纸质发票号')
@@ -439,6 +461,14 @@ class money_invoice(models.Model):
         string=u'公司',
         change_default=True,
         default=lambda self: self.env['res.company']._company_default_get())
+    overdue_days = fields.Float(u'逾期天数', readonly=True,
+                                compute='compute_overdue',
+                                help=u'当前日期 - 到期日')
+    overdue_amount = fields.Float(u'逾期金额', readonly=True,
+                                  compute='compute_overdue',
+                                  help=u'超过到期日后仍未核销的金额')
+    note = fields.Char(u'备注',
+                       help=u'可填入到期日计算的依据')
 
     @api.multi
     def money_invoice_done(self):
@@ -447,11 +477,16 @@ class money_invoice(models.Model):
         :return: 
         """
         for inv in self:
+            inv.reconciled = 0.0
+            inv.to_reconcile = inv.amount
             inv.state = 'done'
+            if not inv.date_due:
+                inv.date_due = fields.Date.context_today(self)
             if inv.category_id.type == 'income':
                 inv.partner_id.receivable += inv.amount
             if inv.category_id.type == 'expense':
                 inv.partner_id.payable += inv.amount
+        return True
 
     @api.multi
     def money_invoice_draft(self):
@@ -460,6 +495,8 @@ class money_invoice(models.Model):
         :return: 
         """
         for inv in self:
+            inv.reconciled = 0.0
+            inv.to_reconcile = 0.0
             inv.state = 'draft'
             if inv.category_id.type == 'income':
                 inv.partner_id.receivable -= inv.amount
@@ -485,6 +522,9 @@ class money_invoice(models.Model):
         :return: 
         """
         for invoice in self:
+            if invoice.name == '.' and invoice.reconciled == 0.0:
+                self.money_invoice_draft()
+                continue
             if invoice.state == 'done':
                 raise UserError(u'不可以删除已经审核的单据')
 
@@ -601,6 +641,7 @@ class source_order_line(models.Model):
 class reconcile_order(models.Model):
     _name = 'reconcile.order'
     _description = u'核销单'
+    _inherit = ['mail.thread']
 
     TYPE_SELECTION = [
         ('adv_pay_to_get', u'预收冲应收'),

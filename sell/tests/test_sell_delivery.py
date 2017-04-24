@@ -58,6 +58,7 @@ class test_sell_delivery(TransactionCase):
         '''测试返回收款状态'''
         # 未收款
         self.delivery.sell_delivery_done()
+        self.delivery.sell_to_return()
         self.delivery._get_sell_money_state()
         self.assertEqual(self.delivery.money_state, u'未收款')
 
@@ -158,8 +159,8 @@ class test_sell_delivery(TransactionCase):
 
     def test_sell_delivery_done(self):
         """审核退货单正常流程"""
-        vals = {'partner_id': self.partner.id, 
-                'is_return': True, 
+        vals = {'partner_id': self.partner.id,
+                'is_return': True,
                 'date_due': (datetime.now()).strftime(ISODATEFORMAT),
                 'warehouse_id': self.customer_warehouse_id.id,
                 'warehouse_dest_id': self.warehouse_id.id,
@@ -282,6 +283,11 @@ class test_sell_delivery(TransactionCase):
         self.env.ref('core.jd').tax_rate = 11
         self.env.ref('goods.cable').tax_rate = 12
         delivery.onchange_partner_id()
+
+    def test_sell_delivery_done_currency(self):
+        """发货单上是外币时进行审核"""
+        self.delivery.currency_id = self.env.ref('base.USD')
+        self.delivery.sell_delivery_done()
 
 
 class test_wh_move_line(TransactionCase):

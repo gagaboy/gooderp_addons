@@ -173,10 +173,10 @@ class wh_move_line(models.Model):
                          compute=_compute_all_amount,
                          inverse=_inverse_price,
                          store=True,
-                         digits=dp.get_precision('Amount'),
+                         digits=dp.get_precision('Price'),
                          help=u'产品的单价')
     price_taxed = fields.Float(u'含税单价',
-                               digits=dp.get_precision('Amount'),
+                               digits=dp.get_precision('Price'),
                                help=u'产品的含税单价')
     discount_rate = fields.Float(u'折扣率%',
                                  help=u'单据的折扣率%')
@@ -335,7 +335,9 @@ class wh_move_line(models.Model):
             self.cost_unit = cost_unit
 
         if self.env.context.get('type') == 'in' and self.goods_id:
-            self.cost_unit = self.goods_id.cost / (1 + self.goods_id.tax_rate * 0.01)
+            # 如果商品上设置了税率，则按商品上的计算，否则按公司上的进项税率计算
+            tax_rate = self.goods_id.tax_rate or self.env.user.company_id.import_tax_rate
+            self.cost_unit = self.goods_id.cost / (1 + tax_rate * 0.01)
 
     @api.multi
     @api.onchange('goods_id', 'tax_rate')

@@ -16,7 +16,10 @@
 					<field name="planned_date"/>
 					<field name="create_uid" string="制单人"/>
 					<field name="approve_uid"/>
+					<field name='currency_id'
+						 groups='finance.group_multi_currency'/>
 					<field name="state"/>
+					<field name="_approve_state"/>
 					<field name="goods_state"/>
 					<field name="money_state"/>
 				</tree>
@@ -54,6 +57,8 @@
 								<field name="partner_id" required="1"
 								domain="[('s_category_id', '!=', False)]"
 								context="{'form_view_ref': 'core.supplier_address_form'}"/>
+								<field name='user_id'
+                                       options="{'no_open': True, 'no_create': True}"/>
 								<field name="date" required="1"/>
 								<field name="warehouse_dest_id"/>
 								<field name="invoice_by_receipt"></field>
@@ -63,6 +68,8 @@
 								<field name="type" widget="radio"/>
 								<field name="goods_state" readonly="1"/>
 								<field name="money_state" readonly="1"/>
+								<field name='currency_id' readonly='1'
+									   groups='finance.group_multi_currency'/>
 							</group>
 						</group>
 						<field name="line_ids">
@@ -78,6 +85,8 @@
 								<field name="price_taxed" groups='buy.in_tax_groups'/>
 								<field name="discount_rate" groups='buy.buy_line_discount_groups'/>
 								<field name="discount_amount" sum="合计折扣额" groups='buy.buy_line_discount_groups'/>
+								<field name='currency_amount' sum='外币合计'
+									   groups='finance.group_multi_currency'/>
 								<field name="amount" sum="合计金额"/>
 								<field name="tax_rate" groups='buy.in_tax_groups'/>
 								<field name="tax_amount" sum="合计税额" groups='buy.in_tax_groups'/>
@@ -119,8 +128,9 @@
 						</group>
 					</sheet>
 					<div class="oe_chatter">
-						<field name="message_follower_ids" widget="mail_followers"/>
-						<field name="message_ids" widget="mail_thread"/>
+	                    <field name="message_follower_ids" widget="mail_followers"/>
+                        <field name="_to_approver_ids" widget="goodprocess" readonly="1"/>
+	                    <field name="message_ids" widget="mail_thread"/>
 					</div>
 				</form>
 			</field>

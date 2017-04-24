@@ -42,7 +42,36 @@ class partner(models.Model):
         string=u'公司',
         change_default=True,
         default=lambda self: self.env['res.company']._company_default_get())
+    tag_ids = fields.Many2many('core.value',
+                               string=u'标签',
+                               domain=[('type', '=', 'partner_tag')],
+                               context={'type': 'partner_tag'})
+    source = fields.Char(u'来源')
+    note = fields.Text(u'备注')
+    main_contact = fields.Char(u'主联系人')
+    responsible_id = fields.Many2one('res.users',
+                                     u'负责人员')
+    share_id = fields.Many2one('res.users',
+                               u'共享人员')
 
     _sql_constraints = [
         ('name_uniq', 'unique(name)', '业务伙伴不能重名')
     ]
+
+    @api.model
+    def name_search(self, name='', args=None, operator='ilike', limit=100):
+        """
+        在many2one字段中支持按编号搜索
+        """
+        args = args or []
+        if name:
+            args.append(('code', 'ilike', name))
+            partners = self.search(args)
+            if partners:
+                return partners.name_get()
+            else:
+                args.remove(('code', 'ilike', name))
+        return super(partner, self).name_search(name=name,
+                                                args=args,
+                                                operator=operator,
+                                                limit=limit)

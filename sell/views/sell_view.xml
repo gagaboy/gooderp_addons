@@ -10,17 +10,18 @@
             		<field name='date'/>
             		<field name='name'/>
             		<field name='type'/>
-            		<field name='staff_id'/>
+            		<field name='user_id'/>
             		<field name='partner_id'/>
             		<field name="amount" sum="合计"/>
             		<field name='delivery_date'/>
             		<field name="create_uid" string="制单人"/>
                     <field name="approve_uid"/>
                     <field name='state'/>
+					<field name="_approve_state"/>
             		<field name='goods_state'/>
             		<field name="money_state"/>
 					<field name='currency_id'
-						 groups='finance.group_multi_currency'/>
+						   groups='finance.group_multi_currency'/>
             	</tree>
         	</field>
     	</record>
@@ -45,7 +46,8 @@
             					<field name='contact'/>
             				    <field name='address'/>
             				    <field name='mobile'/>
-            					<field name='staff_id'/>
+            					<field name='user_id'
+                                       options="{'no_open': True, 'no_create': True}"/>
             					<field name='date'/>
             					<field name='warehouse_id'/>
             				</group>
@@ -109,6 +111,7 @@
             		</sheet>
                 	<div class="oe_chatter">
                     	<field name="message_follower_ids" widget="mail_followers" groups="base.group_user"/>
+						<field name="_to_approver_ids" widget="goodprocess" readonly="1"/>
                     	<field name="message_ids" widget="mail_thread"/>
                 	</div>
             	</form>
@@ -154,13 +157,16 @@
             		<field name='date'/>
             		<field name='name'/>
             		<field name="order_id"/>
-            		<field name='staff_id'/>
+            		<field name='user_id'/>
             		<field name='partner_id'/>
 					<field name='total_qty'/>
             		<field name="amount"/>
             		<field name="create_uid" string="制单人"/>
                     <field name="approve_uid"/>
+					<field name='currency_id'
+						   groups='finance.group_multi_currency'/>
                     <field name='state'/>
+					<field name="_approve_state"/>
             		<field name='money_state'/>
             	</tree>
         	</field>
@@ -192,7 +198,8 @@
             				    <field name='contact'/>
             				    <field name="address"/>
             				    <field name="mobile"/>
-            					<field name='staff_id' attrs="{'readonly': [('state','!=','draft')]}"/>
+            					<field name='user_id'
+                                       options="{'no_open': True, 'no_create': True}"/>
             					<field name='date' attrs="{'readonly': [('state','!=','draft')]}"/>
             					<field name="warehouse_id"/>
 								<field name="warehouse_dest_id" invisible="1"/>
@@ -201,7 +208,9 @@
             				<group>
             					<field name='date_due' required='1' attrs="{'readonly': [('state','!=','draft')]}"/>
             					<field name='order_id' readonly='1'/>
+								<field name='finance_category_id'/>
             					<field name='invoice_id' readonly='1'/>
+								<field name='voucher_id' readonly='1'/>
             					<field name="money_state" readonly="1"/>
 								<field name="currency_id" readonly="1"
 									 groups='finance.group_multi_currency'/>
@@ -289,7 +298,9 @@
 						<field name="note" placeholder="暂无备注信息" attrs="{'readonly': [('state','!=','draft')]}"/>
 						<group>
                             <field name='qc_result' widget='pdf_viewer'
-                                   attrs="{'readonly': [('state', '!=', 'draft')]}" />
+                                   attrs="{'readonly': [('state', '!=', 'draft')]}"
+								   groups='warehouse.group_qc'
+							/>
                         </group>
 		 				<group>
 						    <group>
@@ -304,6 +315,7 @@
             		</sheet>
 	                <div class="oe_chatter">
 	                    <field name="message_follower_ids" widget="mail_followers"/>
+						<field name="_to_approver_ids" widget="goodprocess" readonly="1"/>
 	                    <field name="message_ids" widget="mail_thread"/>
 	                </div>
             	</form>
@@ -346,7 +358,7 @@
             		<field name='date'/>
             		<field name='name'/>
             		<field name="order_id"/>
-            		<field name='staff_id'/>
+            		<field name='user_id'/>
             		<field name='partner_id'/>
 					<field name='total_qty'/>
             		<field name="amount"/>
@@ -354,7 +366,10 @@
             		<field name='date_due'/>
             		<field name="create_uid" string="制单人"/>
                     <field name="approve_uid"/>
+					<field name='currency_id'
+						   groups='finance.group_multi_currency'/>
                     <field name='state'/>
+					<field name="_approve_state"/>
             		<field name='return_state'/>
             	</tree>
         	</field>
@@ -385,7 +400,8 @@
             					<field name='contact'/>
             				    <field name="address"/>
             				    <field name="mobile"/>
-            					<field name='staff_id' attrs="{'readonly': [('state','!=','draft')]}"/>
+            					<field name='user_id'
+                                       options="{'no_open': True, 'no_create': True}"/>
             					<field name='date' attrs="{'readonly': [('state','!=','draft')]}"/>
             					<field name="warehouse_dest_id"/>
 								<field name="warehouse_id" invisible="1"/>
@@ -394,8 +410,12 @@
             				<group>
             					<field name='date_due' required='1' attrs="{'readonly': [('state','!=','draft')]}"/>
             					<field name='order_id' readonly='1'/>
+								<field name='finance_category_id'/>
             					<field name='invoice_id' readonly='1'/>
+								<field name='voucher_id' readonly='1'/>
             					<field name="return_state" readonly="1"/>
+								<field name='currency_id' readonly='1'
+									   groups='finance.group_multi_currency'/>
             					<field name="modifying" invisible="1"/>
             				</group>
             			</group>
@@ -457,7 +477,9 @@
 		 				<field name="note" placeholder="暂无备注信息" attrs="{'readonly': [('state','!=','draft')]}"/>
 						<group>
                             <field name='qc_result' widget='pdf_viewer'
-                                   attrs="{'readonly': [('state', '!=', 'draft')]}" />
+                                   attrs="{'readonly': [('state', '!=', 'draft')]}"
+								   groups='warehouse.group_qc'
+							/>
                         </group>
 		 				<group>
                 			<group>
@@ -479,6 +501,7 @@
             		</sheet>
 	                <div class="oe_chatter">
 	                    <field name="message_follower_ids" widget="mail_followers"/>
+						<field name="_to_approver_ids" widget="goodprocess" readonly="1"/>
 	                    <field name="message_ids" widget="mail_thread"/>
 	                </div>
             	</form>
@@ -525,6 +548,7 @@
                     <field name="create_uid" string="制单人"/>
                     <field name="approve_uid"/>
                     <field name="state"/>
+					<field name="_approve_state"/>
                 </tree>
             </field>
         </record>
@@ -544,6 +568,8 @@
                             <field name="order_id" required="1"
                             	domain="[('state', '=', 'done'), ('type', '=', 'sell')]"
                             	options="{'no_create': True}"/>
+							<field name='user_id'
+								   options="{'no_open': True, 'no_create': True}"/>
                         </group>
                         <group>
                         	<field name="date" required="1"/>
@@ -583,6 +609,7 @@
                 </sheet>
                 <div class="oe_chatter">
                     <field name="message_follower_ids" widget="mail_followers"/>
+					<field name="_to_approver_ids" widget="goodprocess" readonly="1"/>
                     <field name="message_ids" widget="mail_thread"/>
                 </div>
                 </form>
@@ -735,7 +762,7 @@
 		</record>
 
     	<!--根菜单-->
-        <menuitem id='sell_menu' name='销货' groups='group_sell' web_icon="sell,static/description/sale.png"/>
+        <menuitem id='sell_menu' name='销货' groups='group_sell' web_icon="sell,static/description/icon.png"/>
     	<menuitem id='sell_order_menu_root' name='销货' parent='sell_menu' sequence="1"/>
     	<menuitem id='sell_order_menu' name='销货订单' action='sell_order_action'
 			parent='sell_order_menu_root' sequence='1'

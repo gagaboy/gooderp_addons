@@ -40,6 +40,11 @@ class staff_job(models.Model):
     note = fields.Text(u'描述')
     account_id = fields.Many2one('finance.account', u'计提工资科目')
     department_id = fields.Many2one('staff.department', u'部门')
+    company_id = fields.Many2one(
+        'res.company',
+        string=u'公司',
+        change_default=True,
+        default=lambda self: self.env['res.company']._company_default_get())
 
 
 class staff_employee_category(models.Model):
@@ -53,6 +58,11 @@ class staff_employee_category(models.Model):
                                     'employee_category_rel',
                                     'category_id',
                                     'emp_id', u'员工')
+    company_id = fields.Many2one(
+        'res.company',
+        string=u'公司',
+        change_default=True,
+        default=lambda self: self.env['res.company']._company_default_get())
 
 
 class staff(models.Model):
@@ -116,6 +126,13 @@ class staff(models.Model):
     notes = fields.Text(u'其他信息')
     emergency_contact = fields.Char(u'紧急联系人')
     emergency_call = fields.Char(u'紧急联系方式')
+    receiver_id = fields.Many2one('res.users',
+                                  u'收款人',
+                                  ondelete='restrict',
+                                  default=lambda self: self.env.user,
+                                  help=u'收款人')
+    bank_name = fields.Char(u'开户行')
+    bank_num = fields.Char(u'银行账号')
 
     @api.model
     def staff_contract_over_date(self):

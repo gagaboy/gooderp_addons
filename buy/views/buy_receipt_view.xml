@@ -17,7 +17,10 @@
             		<field name='date_due'/>
                     <field name="create_uid" string="制单人"/>
                     <field name="approve_uid"/>
+                    <field name='currency_id'
+                           groups='finance.group_multi_currency'/>
                     <field name='state'/>
+                    <field name="_approve_state"/>
             		<field name='money_state'/>
                 </tree>
             </field>
@@ -45,6 +48,8 @@
                             	attrs="{'readonly': [('state','!=','draft')]}"
                             	domain="[('s_category_id', '!=', False)]"
                             	context="{'form_view_ref': 'core.supplier_address_form'}"/>
+                            <field name='user_id'
+                                   options="{'no_open': True, 'no_create': True}"/>
                             <field name="date" required="1" attrs="{'readonly': [('state','!=','draft')]}"/>
                             <field name="is_return" readonly="1" invisible="1"/>
                             <field name="warehouse_dest_id"/>
@@ -56,6 +61,8 @@
                             <field name='invoice_id' readonly='1'/>
                             <field name='voucher_id'/>
                             <field name="money_state" readonly='1'/>
+                            <field name='currency_id' readonly='1'
+                                   groups='finance.group_multi_currency'/>
                             <field name="modifying" invisible="1"/>
                         </group>
                     </group>
@@ -119,7 +126,9 @@
                     <field name="note" placeholder="暂无备注信息" attrs="{'readonly': [('state','!=','draft')]}"/>
                     <group>
                         <field name='qc_result' widget='pdf_viewer'
-                               attrs="{'readonly': [('state', '!=', 'draft')]}" />
+                               attrs="{'readonly': [('state', '!=', 'draft')]}"
+                               groups='warehouse.group_qc'
+                        />
                     </group>
                     <group>
                         <group>
@@ -147,9 +156,10 @@
                     </group>
                 </sheet>
                 <div class="oe_chatter">
-                    <field name="message_follower_ids" widget="mail_followers"/>
-                    <field name="message_ids" widget="mail_thread"/>
-                </div>
+	                    <field name="message_follower_ids" widget="mail_followers"/>
+                        <field name="_to_approver_ids" widget="goodprocess" readonly="1"/>
+	                    <field name="message_ids" widget="mail_thread"/>
+	            </div>
                 </form>
             </field>
         </record>
@@ -197,7 +207,10 @@
             		<field name='date_due'/>
                     <field name="create_uid" string="制单人"/>
                     <field name="approve_uid"/>
+                    <field name='currency_id'
+                           groups='finance.group_multi_currency'/>
                     <field name='state'/>
+                    <field name="_approve_state"/>
             		<field name='return_state'/>
                 </tree>
             </field>
@@ -224,6 +237,8 @@
                             	attrs="{'readonly': [('state','!=','draft')]}"
                             	domain="[('s_category_id', '!=', False)]"
                             	context="{'form_view_ref': 'core.supplier_address_form'}"/>
+                            <field name='user_id'
+                                   options="{'no_open': True, 'no_create': True}"/>
                             <field name="date" required="1" attrs="{'readonly': [('state','!=','draft')]}"/>
                             <field name="is_return" readonly="1" invisible="1"/>
                             <field name="warehouse_id"/>
@@ -234,6 +249,8 @@
                             <field name='invoice_id' readonly='1'/>
                             <field name='voucher_id'/>
                             <field name="return_state" readonly="1"/>
+                            <field name='currency_id' readonly='1'
+                                   groups='finance.group_multi_currency'/>
                             <field name="modifying" invisible="1"/>
                         </group>
                     </group>
@@ -298,7 +315,9 @@
                     <field name="note" placeholder="暂无备注信息" attrs="{'readonly': [('state','!=','draft')]}"/>
                     <group>
                         <field name='qc_result' widget='pdf_viewer'
-                               attrs="{'readonly': [('state', '!=', 'draft')]}" />
+                               attrs="{'readonly': [('state', '!=', 'draft')]}"
+                               groups='warehouse.group_qc'
+                        />
                     </group>
                     <group>
                         <group>
