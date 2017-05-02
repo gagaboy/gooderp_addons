@@ -189,7 +189,7 @@ class stock_request(models.Model):
                 'note': u'补货申请单号：%s' % line.request_id.name
                 }
 
-    @api.one  
+    @api.one
     def stock_request_done(self):
         todo_buy_lines = []  # 待生成购货订单
         todo_produce_lines = []  # 待生成组装单
@@ -218,9 +218,13 @@ class stock_request(models.Model):
                 if bom_line:
                     assembly = self.env['wh.assembly'].create({
                                                                'bom_id': bom_line.bom_id.id,
-                                                               'goods_qty': line.request_qty
+                                                               'goods_qty': 0,
                                                                })
+                    assembly.onchange_bom()
+                    assembly.goods_qty = line.request_qty
                     assembly.onchange_goods_qty()
+                    assembly.note = assembly.note or ''
+                    assembly.note += u' 补货申请单号：%s' % line.request_id.name
 
                     # 如果待处理行中有属性，则把它传至组装单的组合件行中
                     if line.attribute_id:
@@ -281,6 +285,8 @@ class stock_request(models.Model):
             if buy_order_line:
                 # 增加原订单行的产品数量
                 buy_order_line.quantity += line.request_qty
+                buy_order_line.note = buy_order_line.note or ''
+                buy_order_line.note += u' %s' % (line.request_id.name)
             else:
                 # 创建购货订单行
                 vals = self._get_buy_order_line_data(line, buy_order)

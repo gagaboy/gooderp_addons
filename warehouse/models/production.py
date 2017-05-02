@@ -150,8 +150,10 @@ class wh_assembly(models.Model):
                 })
             self.line_in_ids = False
             self.line_out_ids = False
-            self.line_out_ids = line_out_ids
-            self.line_in_ids = line_in_ids
+            if line_in_ids:
+                self.line_in_ids = line_in_ids
+            if line_out_ids:
+                self.line_out_ids = line_out_ids
         elif self.line_in_ids:
             self.line_in_ids[0].goods_qty = self.goods_qty
 
