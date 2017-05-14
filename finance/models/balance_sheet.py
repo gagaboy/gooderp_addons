@@ -84,7 +84,7 @@ class create_balance_sheet_wizard(models.TransientModel):
             for trial_balance in trial_balances:
                 # 根据参数code 对应的科目的 方向 进行不同的操作
                 #  trial_balance.subject_name_id.costs_types == 'assets'解决：累计折旧 余额记贷方
-                if trial_balance.subject_name_id.costs_types == 'assets':
+                if trial_balance.subject_name_id.costs_types == 'assets' or trial_balance.subject_name_id.costs_types == 'cost':
                     subject_vals.append(trial_balance[compute_field_list[0]] - trial_balance[compute_field_list[1]])
                 elif trial_balance.subject_name_id.costs_types == 'debt' or trial_balance.subject_name_id.costs_types == 'equity':
                     subject_vals.append(trial_balance[compute_field_list[1]] - trial_balance[compute_field_list[0]])
@@ -92,6 +92,24 @@ class create_balance_sheet_wizard(models.TransientModel):
 
         else:
             return 0
+
+    def deal_with_balance_formula(self, balance_formula, period_id, year_begain_field):
+        if balance_formula:
+            return_vals = sum([self.compute_balance(one_formula, period_id, year_begain_field)
+                    for one_formula in balance_formula.split(';')])
+        else:
+            return_vals = 0
+        return return_vals
+    def balance_sheet_create(self, balance_sheet_obj, year_begain_field, current_period_field):
+        balance_sheet_obj.write(
+            {'beginning_balance': fabs(self.deal_with_balance_formula(balance_sheet_obj.balance_formula,
+                                                                      self.period_id, current_period_field)),
+             'ending_balance': fabs(self.deal_with_balance_formula(balance_sheet_obj.balance_formula,
+                                                                   self.period_id, current_period_field)),
+             'beginning_balance_two': self.deal_with_balance_formula(balance_sheet_obj.balance_two_formula,
+                                                                     self.period_id, year_begain_field),
+             'ending_balance_two': self.deal_with_balance_formula(balance_sheet_obj.balance_two_formula,
+                                                                  self.period_id, current_period_field)})
 
     @api.multi
     def create_balance_sheet(self):
@@ -103,10 +121,7 @@ class create_balance_sheet_wizard(models.TransientModel):
         year_begain_field = ['year_init_debit', 'year_init_credit']
         current_period_field = ['ending_balance_debit', 'ending_balance_credit']
         for balance_sheet_obj in balance_sheet_objs:
-            balance_sheet_obj.write({'beginning_balance': fabs(self.compute_balance(balance_sheet_obj.balance_formula, self.period_id, year_begain_field)),
-                                     'ending_balance': fabs(self.compute_balance(balance_sheet_obj.balance_formula, self.period_id, current_period_field)),
-                                     'beginning_balance_two': self.compute_balance(balance_sheet_obj.balance_two_formula, self.period_id, year_begain_field),
-                                     'ending_balance_two': self.compute_balance(balance_sheet_obj.balance_two_formula, self.period_id, current_period_field)})
+            self.balance_sheet_create(balance_sheet_obj, year_begain_field, current_period_field)
         force_company = self._context.get('force_company')
         if not force_company:
             force_company = self.env.user.company_id.id
@@ -116,7 +131,7 @@ class create_balance_sheet_wizard(models.TransientModel):
                                  + u'年' + self.period_id.month + u'月' + str(days) + u'日' + u',,,' + u'单位：元'
         return {     # 返回生成资产负债表的数据的列表
             'type': 'ir.actions.act_window',
-            'name': u'资产负债表',
+            'name': u'资产负债表：'+ self.period_id.name,
             'view_type': 'form',
             'view_mode': 'tree',
             'res_model': 'balance.sheet',
@@ -128,6 +143,14 @@ class create_balance_sheet_wizard(models.TransientModel):
             'limit': 65535,
         }
 
+    def deal_with_profit_formula(self, occurrence_balance_formula, period_id, year_begain_field):
+        if occurrence_balance_formula:
+            return_vals = sum([self.compute_profit(balance_formula, period_id, year_begain_field)
+                              for balance_formula in occurrence_balance_formula.split(";")
+                            ])
+        else:
+            return_vals = 0
+        return return_vals
     @api.multi
     def create_profit_statement(self):
         """生成利润表"""
@@ -138,7 +161,7 @@ class create_balance_sheet_wizard(models.TransientModel):
         year_begain_field = ['cumulative_occurrence_debit', 'cumulative_occurrence_credit']
         current_period_field = ['current_occurrence_debit', 'current_occurrence_credit']
         for balance_sheet_obj in balance_sheet_objs:
-            balance_sheet_obj.write({'cumulative_occurrence_balance': self.compute_profit(balance_sheet_obj.occurrence_balance_formula, self.period_id, year_begain_field),
+            balance_sheet_obj.write({'cumulative_occurrence_balance': self.deal_with_profit_formula(balance_sheet_obj.occurrence_balance_formula, self.period_id, year_begain_field),
                                      'current_occurrence_balance': self.compute_profit(balance_sheet_obj.occurrence_balance_formula, self.period_id, current_period_field)})
         force_company = self._context.get('force_company')
         if not force_company:
@@ -149,7 +172,7 @@ class create_balance_sheet_wizard(models.TransientModel):
                                  + u'年' + self.period_id.month + u'月' + str(days) + u'日' + u',' + u'单位：元'
         return {      # 返回生成利润表的数据的列表
             'type': 'ir.actions.act_window',
-            'name': u'利润表',
+            'name': u'利润表：' + self.period_id.name,
             'view_type': 'form',
             'view_mode': 'tree',
             'res_model': 'profit.statement',

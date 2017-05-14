@@ -94,7 +94,7 @@ class voucher(models.Model):
             raise ValidationError(u'请输入凭证行')
         for line in self.line_ids:
             if line.debit + line.credit == 0:
-                raise ValidationError(u'单行凭证行借和贷不能同时为0\n 借方金额为: %s 贷方金额为:%s' % (line.debit, line.credit))
+                raise ValidationError(u'单行凭证行 %s 借和贷不能同时为0\n 借方金额为: %s 贷方金额为:%s' % ( line.account_id.name, line.debit, line.credit))
             if line.debit * line.credit != 0:
                 raise ValidationError(u'单行凭证行不能同时输入借和贷\n 摘要为%s的凭证行 借方为:%s 贷方为:%s' %
                                       (line.name, line.debit, line.credit))
@@ -152,6 +152,7 @@ class voucher(models.Model):
             if len(vals) == 1 and vals.get('state', False):  # 审核or反审核
                 return super(voucher, self).write(vals)
             else:
+                order = self.browse(order.id)
                 if order.state == 'done':
                     raise UserError(u'凭证%s已审核！修改请先反审核！'%order.name)
             return super(voucher, self).write(vals)
@@ -355,7 +356,7 @@ class finance_period(models.Model):
         :return: 返回一个月的第一天和最后一天 （'2016-01-01','2016-01-31'）
         """
         month_day_range = calendar.monthrange(int(period_id.year), int(period_id.month))
-        return ("%s-%s-01" % (period_id.year, period_id.month), "%s-%s-%s" % (period_id.year, period_id.month, str(month_day_range[1])))
+        return ("%s-%s-01" % (period_id.year, period_id.month.zfill(2)), "%s-%s-%s" % (period_id.year, period_id.month.zfill(2), str(month_day_range[1])))
 
     @api.multi
     def get_year_fist_period_id(self):
@@ -449,6 +450,7 @@ class finance_account(models.Model):
     ], u'类型', required="1")
     currency_id = fields.Many2one('res.currency', u'外币币别')
     exchange = fields.Boolean(u'是否期末调汇')
+    active = fields.Boolean(u'启用', default=True)
     company_id = fields.Many2one(
         'res.company',
         string=u'公司',
@@ -523,6 +525,7 @@ class auxiliary_financing(models.Model):
         ('project', u'项目'),
         ('department', u'部门'),
     ], u'分类', default=lambda self: self.env.context.get('type'))
+    active = fields.Boolean(u'启用', default=True)
     company_id = fields.Many2one(
         'res.company',
         string=u'公司',
@@ -578,3 +581,39 @@ class change_voucher_name(models.Model):
         string=u'公司',
         change_default=True,
         default=lambda self: self.env['res.company']._company_default_get())
+
+
+class dupont(models.Model):
+    _name = 'dupont'
+    _description = u'企业财务指标'
+    _rec_name = 'period_id'
+    _order = 'period_id'
+
+    period_id = fields.Many2one('finance.period', u'期间', index=True)
+    kpi = fields.Char(u'指标')
+    val = fields.Float(u'值')
+
+    @api.model
+    def fill(self, period_id):
+        
+        if self.search([('period_id','=',period_id.id)]):
+            return True
+
+        ta = te = income = ni = roe = roa = em = 0.0
+
+        for b in self.env['trial.balance'].search([('period_id','=',period_id.id)]):
+            if b.subject_name_id.costs_types == 'assets':
+                ta += b.ending_balance_debit - b.ending_balance_credit
+            if b.subject_name_id.costs_types == 'equity':
+                te += b.ending_balance_credit - b.ending_balance_debit
+            if b.subject_name_id.costs_types == 'in':
+                income += b.current_occurrence_credit
+            if b.subject_name_id == self.env.user.company_id.profit_account:
+                ni = b.current_occurrence_credit
+        
+        roe = te and ni / te * 100
+        roa = ta and ni / ta * 100
+        em  = te and ta / te * 100
+        res = {u'资产':ta, u'权益':te, u'收入':income,u'净利':ni,u'权益净利率':roe, u'资产净利率':roa, u'权益乘数':em}
+        for k in res:
+            self.create({'period_id':period_id.id,'kpi':k, 'val':res[k]})

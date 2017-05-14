@@ -7,7 +7,7 @@
 
 <odoo>
     <template id="left_menu">
-        <t t-set="debug_param" t-value="'?&amp;debug=' if debug else ''"/>
+        <t t-set="debug_param" t-value="'?debug=%s'%debug if debug else ''"/>
         <t t-if="len(menu_data['children'])>1">
             <div id="left_menu"  class="big_show">
                 <div t-foreach="menu_data['children']" t-as="menu"  >
@@ -61,7 +61,7 @@
                      >
                     <div class="container-fluid">
                         <div class="o_sub_menu_logo">
-                            <img src="/web/binary/company_logo"  />
+                            <img src="/web/static/src/img/logo.png"/>
                         </div>
                         <div class="navbar-header">
                             <!--

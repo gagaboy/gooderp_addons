@@ -270,11 +270,22 @@ class approver(models.Model):
     @api.multi
     def goto(self):
         self.ensure_one()
+        views = self.env['ir.ui.view'].search([('model','=',self.model),('type','=','form')])       
+        if getattr(self.env[self.model].browse(self.res_id), 'is_return', False):
+            for v in views:
+                if '_return_' in v.xml_id :
+                    vid = v.id
+                    break
+        else:
+            vid = views[0].id
+
         return {
                             'name': u'审批',
                             'view_type': 'form',
                             'view_mode': 'form',
                             'res_model': self.model,
+                            'view_id': False,
+                            'views': [(vid, 'form')],
                             'type': 'ir.actions.act_window',
                             'res_id': self.res_id,
                         }
@@ -297,6 +308,7 @@ class process(models.Model):
     type = fields.Char(u'类型', help=u'有些单据根据type字段区分具体流程')
     is_department_approve = fields.Boolean(string=u'部门经理审批')
     line_ids = fields.One2many('good_process.process_line', 'process_id', string=u'审批组')
+    active = fields.Boolean(u'启用', default=True)
 
     #TODO: model_id 的 type 唯一
     @api.model
