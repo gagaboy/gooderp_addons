@@ -3,6 +3,7 @@
 from odoo import fields, models, api
 import odoo.addons.decimal_precision as dp
 from odoo.exceptions import UserError
+from odoo.tools import float_compare
 
 # 订单审核状态可选值
 BUY_ORDER_STATES = [
@@ -86,15 +87,15 @@ class buy_adjust(models.Model):
         当调整后数量 < 原单据中已入库数量，则报错；
         当调整后数量 > 原单据中已入库数量，则更新原单据及入库单分单的数量；
         当调整后数量 = 原单据中已入库数量，则更新原单据数量，删除入库单分单；
-        当新增产品时，则更新原单据及入库单分单明细行。
+        当新增商品时，则更新原单据及入库单分单明细行。
         '''
         if self.state == 'done':
             raise UserError(u'请不要重复审核！\n采购变更单%s已审核'%self.name)
         if not self.line_ids:
-            raise UserError(u'请输入产品明细行！')
+            raise UserError(u'请输入商品明细行！')
         for line in self.line_ids:
             if  line.price_taxed < 0:
-                raise UserError(u'产品含税单价不能小于0！\n单价:%s'%line.price_taxed)
+                raise UserError(u'商品含税单价不能小于0！\n单价:%s'%line.price_taxed)
         buy_receipt = self.env['buy.receipt'].search(
                     [('order_id', '=', self.order_id.id),
                      ('state', '=', 'draft')])
@@ -154,7 +155,7 @@ class buy_adjust_line(models.Model):
     @api.one
     @api.depends('goods_id')
     def _compute_using_attribute(self):
-        '''返回订单行中产品是否使用属性'''
+        '''返回订单行中商品是否使用属性'''
         self.using_attribute = self.goods_id.attribute_ids and True or False
 
     @api.one
@@ -173,13 +174,14 @@ class buy_adjust_line(models.Model):
     @api.one
     def _inverse_price(self):
         '''由不含税价反算含税价，保存时生效'''
-        if not self.price_taxed:
-            self.price_taxed = self.price * (1 + self.tax_rate * 0.01)
+        self.price_taxed = self.price * (1 + self.tax_rate * 0.01)
 
     @api.onchange('price', 'tax_rate')
     def onchange_price(self):
         '''当订单行的不含税单价改变时，改变含税单价'''
-        if not self.price_taxed:
+        price = self.price_taxed / (1 + self.tax_rate * 0.01)  # 不含税单价
+        decimal = self.env.ref('core.decimal_price')
+        if float_compare(price, self.price, precision_digits=decimal.digits) != 0:
             self.price_taxed = self.price * (1 + self.tax_rate * 0.01)
 
     order_id = fields.Many2one('buy.adjust', u'订单编号', index=True,
@@ -238,7 +240,7 @@ class buy_adjust_line(models.Model):
 
     @api.onchange('goods_id')
     def onchange_goods_id(self):
-        '''当订单行的产品变化时，带出产品上的单位、默认仓库、成本价'''
+        '''当订单行的商品变化时，带出商品上的单位、默认仓库、成本价'''
         if self.goods_id:
             self.uom_id = self.goods_id.uom_id
             self.price_taxed = self.goods_id.cost

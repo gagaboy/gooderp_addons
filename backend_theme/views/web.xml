@@ -60,9 +60,9 @@
                      groups="base.group_user,base.group_portal"
                      >
                     <div class="container-fluid">
-                        <div class="o_sub_menu_logo">
+                        <a class="o_sub_menu_logo">
                             <img src="/web/static/src/img/logo.png"/>
-                        </div>
+                        </a>
                         <div class="navbar-header">
                             <!--
                             <a href="#"
@@ -127,7 +127,8 @@
               name="App Drawer - Secondary Menu"
               >
 
-        <xpath expr="//a[@class='o_sub_menu_logo']" position="replace" />
+        <xpath expr="//a[@class='o_sub_menu_logo']" position="replace" >
+        </xpath>
 
         <xpath expr="//div[@class='o_sub_menu_footer']" position="replace" />
 
@@ -239,7 +240,7 @@
         <xpath expr="//ul[contains(@class, 'oe_application_menu_placeholder')]" position="replace">
 
             <div class="panel-default app-drawer-app-panel" id="appDrawerAppMenu">
-                <div class="panel-heading" id="appDrawerAppPanelHead">
+                <div class="theme-panel-heading" id="appDrawerAppPanelHead">
                     <h4 class="app-drawer-panel-title">
                         <a href="#" class="app-drawer-icon-close drawer-toggle">
                             <i class="fa fa-lg fa-chevron-left" />

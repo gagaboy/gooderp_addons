@@ -17,7 +17,6 @@ class money_order(models.Model):
                               ondelete='restrict',
                               help=u'与付款相关的销售订单号')
 
-
 class money_invoice(models.Model):
     _inherit = 'money.invoice'
 

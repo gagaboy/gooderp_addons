@@ -105,11 +105,8 @@ class other_money_order(models.Model):
         string=u'公司',
         change_default=True,
         default=lambda self: self.env['res.company']._company_default_get())
-    receiver_id = fields.Many2one('res.users',
-                                   u'收款人',
-                                   ondelete='restrict',
-                                   default=lambda self: self.env.user,
-                                   help=u'收款人')
+    receiver = fields.Char(u'收款人',
+                           help=u'收款人')
     bank_name = fields.Char(u'开户行')
     bank_num = fields.Char(u'银行账号')
     voucher_id = fields.Many2one('voucher',
@@ -126,16 +123,13 @@ class other_money_order(models.Model):
         else:
             return {'domain': {'partner_id': [('s_category_id', '!=', False)]}}
 
-    @api.onchange('receiver_id', 'partner_id')
-    def onchange_receiver_id(self):
+    @api.onchange('partner_id')
+    def onchange_partner_id(self):
         """
-        更改收款人，自动填入开户行和银行帐号
+        更改业务伙伴，自动填入收款人、开户行和银行帐号
         """
-        if self.receiver_id:
-            self.bank_name = self.receiver_id.employee_ids and self.receiver_id.employee_ids[0].bank_name or ''
-            self.bank_num = self.receiver_id.employee_ids and self.receiver_id.employee_ids[0].bank_num or ''
         if self.partner_id:
-            self.receiver_id = False
+            self.receiver = self.partner_id.name
             self.bank_name = self.partner_id.bank_name
             self.bank_num = self.partner_id.bank_num
 
@@ -201,7 +195,7 @@ class other_money_order(models.Model):
     @api.multi
     def create_voucher(self):
         """创建凭证并审核非初始化凭证"""
-        vals = {}
+        init_obj = ''
         # 初始化单的话，先找是否有初始化凭证，没有则新建一个
         if self.is_init:
             vouch_obj = self.env['voucher'].search([('is_init', '=', True)])
@@ -211,25 +205,19 @@ class other_money_order(models.Model):
         else:
             vouch_obj = self.env['voucher'].create({'date': self.date})
         if self.is_init:
-            vals.update({'init_obj': 'other_money_order-%s' % (self.id)})
+            init_obj = 'other_money_order-%s' % (self.id)
 
         if self.type == 'other_get':  # 其他收入单
-            self.other_get_create_voucher_line(vouch_obj)
+            self.other_get_create_voucher_line(vouch_obj, init_obj)
         else:  # 其他支出单
             self.other_pay_create_voucher_line(vouch_obj)
 
-        # 删除初始非需要的凭证明细行
-        if self.is_init:
-            vouch_line_ids = self.env['voucher.line'].search([
-                ('account_id', '!=', self.bank_id.account_id.id),
-                ('init_obj', '=', 'other_money_order-%s' % (self.id))])
-            for vouch_line_id in vouch_line_ids:
-                vouch_line_id.unlink()
-        else:
+        # 如果非初始化单则审核
+        if not self.is_init:
             vouch_obj.voucher_done()
         return vouch_obj
 
-    def other_get_create_voucher_line(self, vouch_obj):
+    def other_get_create_voucher_line(self, vouch_obj, init_obj):
         """
         其他收入单生成凭证明细行
         :param vouch_obj: 凭证
@@ -247,17 +235,18 @@ class other_money_order(models.Model):
                          'debit_account_id': self.bank_id.account_id.id,
                          'partner_credit': self.partner_id.id, 'partner_debit': '',
                          'sell_tax_amount': line.tax_amount or 0,
+                         'init_obj': init_obj,
                          })
             # 贷方行
-            self.env['voucher.line'].create({
-                'name': u"%s %s" % (vals.get('name'), vals.get('note')),
-                'partner_id': vals.get('partner_credit', ''),
-                'account_id': vals.get('credit_account_id'),
-                'credit': line.amount,
-                'voucher_id': vals.get('vouch_obj_id'),
-                'auxiliary_id': vals.get('credit_auxiliary_id', False),
-                'init_obj': vals.get('init_obj', False),
-            })
+            if not init_obj:
+                self.env['voucher.line'].create({
+                    'name': u"%s %s" % (vals.get('name'), vals.get('note')),
+                    'partner_id': vals.get('partner_credit', ''),
+                    'account_id': vals.get('credit_account_id'),
+                    'credit': line.amount,
+                    'voucher_id': vals.get('vouch_obj_id'),
+                    'auxiliary_id': vals.get('credit_auxiliary_id', False),
+                })
             # 销项税行
             if vals.get('sell_tax_amount'):
                 if not self.env.user.company_id.output_tax_account:
