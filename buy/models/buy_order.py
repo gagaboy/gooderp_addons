@@ -77,7 +77,8 @@ class buy_order(models.Model):
         '''计算购货订单付款/退款状态'''
         receipts = self.env['buy.receipt'].search([('order_id', '=', self.id)])
         money_order_rows = self.env['money.order'].search([('buy_id', '=', self.id),
-       													   ('source_ids', '=', False)])
+                                                           ('reconciled', '=', 0),
+                                                           ('state', '=', 'done')])
         self.paid_amount = sum([receipt.invoice_id.reconciled for receipt in receipts]) +\
                            sum([order_row.amount for order_row  in money_order_rows])
 
@@ -272,6 +273,7 @@ class buy_order(models.Model):
             'to_reconcile': amount,
             'state': 'draft',
             'origin_name': self.name,
+            'buy_id': self.id,
         }
 
     @api.one
@@ -679,7 +681,7 @@ class payment(models.Model):
                                 'date_due': fields.Date.context_today(self),
                                 'state': 'draft',
                             })
-            self.env["money.order"].create({
+            self.with_context(type='pay').env["money.order"].create({
                                 'partner_id': self.buy_id.partner_id.id,
                                 'bank_name': self.buy_id.partner_id.bank_name,
                                 'bank_num': self.buy_id.partner_id.bank_num,

@@ -123,7 +123,8 @@ class bank_account(models.Model):
                     'tax_rate': 0,
                     'tax_amount': 0,
                 })],
-                'state': 'draft'
+                'state': 'draft',
+                'currency_amount': self.currency_amount,
             })
             # 审核 其他收入单
             other_money_init.other_money_done()
@@ -153,26 +154,3 @@ class bank_account(models.Model):
             'context': {'default_bank_id': self.id},
             'target': 'new',
         }
-class core_category(models.Model):
-    _inherit = 'core.category'
-
-    @api.model
-    def _defaut_account_in_id(self):
-        """
-        返回默认主营业务收入
-        :return:
-        """
-        return self.env.ref('finance.account_income').id
-
-
-    @api.model
-    def _defaut_account_out_id(self):
-        """
-          返回默认主营业务成本
-          :return:
-        """
-        return self.env.ref('finance.account_cost').id
-
-
-    account_in_id = fields.Many2one('finance.account', u'收入科目', help=u'科目', default=_defaut_account_in_id)
-    account_out_id = fields.Many2one('finance.account', u'成本科目', help=u'科目', default=_defaut_account_out_id)

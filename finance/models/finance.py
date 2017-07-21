@@ -233,6 +233,8 @@ class voucher_line(models.Model):
     @api.multi
     @api.onchange('account_id')
     def onchange_account_id(self):
+        self.currency_id = self.account_id.currency_id
+        self.rate_silent = self.account_id.currency_id.rate
         res = {
             'domain': {
                 'partner_id': [('name', '=', False)],
@@ -559,8 +561,8 @@ class bank_account(models.Model):
         self.currency_id = self.account_id.currency_id.id
 
     account_id = fields.Many2one('finance.account', u'科目')
-    currency_id = fields.Many2one('res.currency', u'外币币别', compute='_compute_currency_id', store=True, readonly=True)
-    currency_amount = fields.Float(u'外币金额', digits=dp.get_precision('Amount'), readonly=True)
+    currency_id = fields.Many2one('res.currency', u'外币币别', compute='_compute_currency_id', store=True)
+    currency_amount = fields.Float(u'外币金额', digits=dp.get_precision('Amount'))
 
 class core_category(models.Model):
     '''继承core cotegory，添加科目类型'''
