@@ -4,7 +4,7 @@ from odoo import api, fields, models
 import odoo.addons.decimal_precision as dp
 
 
-class opportunity(models.Model):
+class Opportunity(models.Model):
     _name = 'opportunity'
     _inherits = {'task': 'task_id'}
     _inherit = ['mail.thread']
@@ -25,7 +25,8 @@ class opportunity(models.Model):
         计算报价总额
         :return:
         """
-        self.total_amount = sum(line.price * line.quantity for line in self.line_ids)
+        self.total_amount = sum(
+            line.price * line.quantity for line in self.line_ids)
 
     task_id = fields.Many2one('task',
                               u'任务',
@@ -67,8 +68,13 @@ class opportunity(models.Model):
         help=u'成功原因分析',
     )
 
+    @api.multi
+    def assign_to_me(self):
+        ''' 继承任务 指派给自己，将商机指派给自己，并修改状态 '''
+        self.task_id.assign_to_me()
 
-class goods_quotation(models.Model):
+
+class GoodsQuotation(models.Model):
     _name = 'goods.quotation'
     _description = u'商品报价'
 

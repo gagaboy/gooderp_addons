@@ -25,7 +25,7 @@
     'website': 'https://www.osbzr.com',
     'category': 'gooderp',
     'description':
-     '''
+    '''
                             该模块可以方便的管理销货。
 
                             通过创建销货订单，审核后将销货订单行中的商品销售给客户，来完成销货功能。
@@ -45,6 +45,7 @@
             'data/sell_data.xml',
             'security/groups.xml',
             'views/sell_view.xml',
+            'views/customer_view.xml',
             'report/customer_statements_view.xml',
             'report/sell_order_track_view.xml',
             'report/sell_order_detail_view.xml',
@@ -65,10 +66,10 @@
             'security/ir.model.access.csv',
             'report/report_data.xml',
             'data/home_page_data.xml'
-            ],
+    ],
     'demo': [
-             'data/sell_demo.xml',
-             ],
+        'data/sell_demo.xml',
+    ],
     'installable': True,
     'auto_install': False,
 }

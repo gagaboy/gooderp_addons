@@ -4,7 +4,7 @@ from odoo import fields, models, api, tools
 import odoo.addons.decimal_precision as dp
 
 
-class customer_statements_report(models.Model):
+class CustomerStatementsReport(models.Model):
     _name = "customer.statements.report"
     _description = u"客户对账单"
     _auto = False
@@ -13,13 +13,11 @@ class customer_statements_report(models.Model):
     @api.one
     @api.depends('amount', 'pay_amount', 'partner_id')
     def _compute_balance_amount(self):
-        pre_record = self.search([('id', '=', self.id - 1), ('partner_id', '=', self.partner_id.id)])
         # 相邻的两条记录，partner不同，应收款余额重新计算
-        if pre_record:
-            before_balance = pre_record.balance_amount
-        else:
-            before_balance = 0
-        self.balance_amount += before_balance + self.amount - self.pay_amount - self.discount_money
+        pre_record = self.search(
+            [('id', '<=', self.id), ('partner_id', '=', self.partner_id.id)])
+        for pre in pre_record:
+            self.balance_amount += pre.amount - pre.pay_amount - self.discount_money
 
     partner_id = fields.Many2one('partner', string=u'业务伙伴', readonly=True)
     name = fields.Char(string=u'单据编号', readonly=True)
@@ -33,7 +31,7 @@ class customer_statements_report(models.Model):
                                   compute='_compute_balance_amount',
                                   digits=dp.get_precision('Amount'))
     discount_money = fields.Float(string=u'收款折扣', readonly=True,
-                              digits=dp.get_precision('Amount'))
+                                  digits=dp.get_precision('Amount'))
     note = fields.Char(string=u'备注', readonly=True)
 
     def init(self):
@@ -89,8 +87,20 @@ class customer_statements_report(models.Model):
                         0 AS balance_amount,
                         ro.note AS note
                 FROM reconcile_order AS ro
-                LEFT JOIN money_invoice AS mi ON mi.name = ro.name
                 LEFT JOIN source_order_line AS sol ON sol.receivable_reconcile_id = ro.id
-                WHERE ro.state = 'done' AND mi.state = 'done' AND mi.name ilike 'RO%'
+                WHERE ro.state = 'done' AND ro.business_type in ('get_to_pay', 'get_to_get')
+                UNION ALL
+                SELECT ro.to_partner_id AS partner_id,
+                        ro.name,
+                        ro.date,
+                        ro.write_date AS done_date,
+                        sol.this_reconcile AS amount,
+                        0 AS pay_amount,
+                        0 AS discount_money,
+                        0 AS balance_amount,
+                        ro.note AS note
+                FROM reconcile_order AS ro
+                LEFT JOIN source_order_line AS sol ON sol.receivable_reconcile_id = ro.id
+                WHERE ro.state = 'done' AND ro.business_type = 'get_to_get'
                 ) AS ps)
         """)

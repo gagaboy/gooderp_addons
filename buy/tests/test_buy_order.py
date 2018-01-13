@@ -3,12 +3,13 @@ from odoo.tests.common import TransactionCase
 from odoo.exceptions import UserError
 
 
-class test_buy_order(TransactionCase):
+class TestBuyOrder(TransactionCase):
 
     def setUp(self):
-        super(test_buy_order, self).setUp()
+        super(TestBuyOrder, self).setUp()
         # 给buy_order_1中的商品“键盘”的分类设置科目
-        self.env.ref('core.goods_category_1').account_id = self.env.ref('finance.account_goods').id
+        self.env.ref('core.goods_category_1').account_id = self.env.ref(
+            'finance.account_goods').id
         self.order = self.env.ref('buy.buy_order_1')
         self.order.bank_account_id = False
 
@@ -17,13 +18,15 @@ class test_buy_order(TransactionCase):
         self.env.ref('money.pay_2000').money_order_done()
 
     def test_onchange_discount_rate(self):
-        ''' 优惠率改变时，改变优惠金额，优惠后金额也改变'''
+        ''' 优惠率改变时，改变优惠金额，成交金额也改变'''
         amount_before = self.order.amount
         discount_amount_before = self.order.discount_amount
         self.order.discount_rate = 10
         self.order.onchange_discount_rate()
-        self.assertTrue(self.order.amount != amount_before)
-        self.assertTrue(self.order.discount_amount != discount_amount_before)
+        if amount_before:
+            self.assertTrue(self.order.amount != amount_before)
+            self.assertTrue(self.order.discount_amount !=
+                            discount_amount_before)
 
     def test_get_buy_goods_state(self):
         '''返回收货状态'''
@@ -33,7 +36,7 @@ class test_buy_order(TransactionCase):
         self.order._get_buy_goods_state()
         self.assertTrue(self.order.goods_state == u'未入库')
         receipt = self.env['buy.receipt'].search(
-                  [('order_id', '=', self.order.id)])
+            [('order_id', '=', self.order.id)])
         # 采购订单行的已入库数量等于商品数量时，将商品状态写为全部入库
         receipt.buy_receipt_done()
         self.order._get_buy_goods_state()
@@ -44,7 +47,7 @@ class test_buy_order(TransactionCase):
         # 采购订单行的已入库数量小于商品数量时，将商品状态写为部分入库
         self.order.buy_order_done()
         receipt = self.env['buy.receipt'].search(
-                  [('order_id', '=', self.order.id)])
+            [('order_id', '=', self.order.id)])
         for line in receipt.line_in_ids:
             line.goods_qty = 5
         receipt.buy_receipt_done()
@@ -54,8 +57,8 @@ class test_buy_order(TransactionCase):
     def test_default_warehouse_dest(self):
         '''新建购货订单时默认调入仓库'''
         order = self.env['buy.order'].with_context({
-             'warehouse_dest_type': 'stock'
-             }).create({})
+            'warehouse_dest_type': 'stock'
+        }).create({})
         self.assertTrue(order.warehouse_dest_id.type == 'stock')
 
     def test_unlink(self):
@@ -89,6 +92,7 @@ class test_buy_order(TransactionCase):
         self.order.bank_account_id = bank_account
         for line in self.order.line_ids:
             line.quantity = 1
+            line.tax_rate = 0
         self.order.buy_order_done()
 
         # 预付款不为空时，请选择结算账户
@@ -119,7 +123,7 @@ class test_buy_order(TransactionCase):
         self.order.buy_order_done()
         self.order.buy_order_draft()
         receipt = self.env['buy.receipt'].search(
-                  [('order_id', '=', self.order.id)])
+            [('order_id', '=', self.order.id)])
         self.assertTrue(not receipt)
         self.assertTrue(self.order.state == 'draft')
         self.assertTrue(not self.order.approve_uid.id)
@@ -131,7 +135,7 @@ class test_buy_order(TransactionCase):
         # 订单已收货不能反审核
         self.order.buy_order_done()
         receipt = self.env['buy.receipt'].search(
-                  [('order_id', '=', self.order.id)])
+            [('order_id', '=', self.order.id)])
         receipt.buy_receipt_done()
         with self.assertRaises(UserError):
             self.order.buy_order_draft()
@@ -145,7 +149,7 @@ class test_buy_order(TransactionCase):
         self.order.bank_account_id = bank_account
         self.order.buy_order_done()
         money_order = self.env['money.order'].search([
-            ('origin_name','=',self.order.name)])
+            ('origin_name', '=', self.order.name)])
         money_order.money_order_done()
         self.order.buy_order_draft()
 
@@ -155,7 +159,7 @@ class test_buy_order(TransactionCase):
         # 全部入库
         self.order.buy_order_done()
         receipt = self.env['buy.receipt'].search(
-                  [('order_id', '=', self.order.id)])
+            [('order_id', '=', self.order.id)])
         receipt.buy_receipt_done()
         self.assertTrue(self.order.goods_state == u'全部入库')
         # 批次管理拆分订单行
@@ -164,14 +168,14 @@ class test_buy_order(TransactionCase):
             line.goods_id = self.env.ref('goods.mouse').id
             new_order.buy_generate_receipt()
         receipt = self.env['buy.receipt'].search(
-                  [('order_id', '=', new_order.id)])
+            [('order_id', '=', new_order.id)])
         self.assertTrue(len(receipt.line_in_ids) == 10)
         # 退货订单
         # 全部入库
         return_receipt = self.env.ref('buy.buy_return_order_1')
         return_receipt.buy_order_done()
         receipt = self.env['buy.receipt'].search(
-                  [('order_id', '=', return_receipt.id)])
+            [('order_id', '=', return_receipt.id)])
         receipt.buy_receipt_done()
         return_receipt.buy_generate_receipt()
 
@@ -204,7 +208,8 @@ class test_buy_order(TransactionCase):
 
         self.order.receipt_ids[0].buy_receipt_done()
         self.assertTrue(self.order.invoice_count == 1)
-        self.assertTrue(self.order.invoice_ids == self.order.receipt_ids[0].invoice_id)
+        self.assertTrue(self.order.invoice_ids ==
+                        self.order.receipt_ids[0].invoice_id)
 
     def test_action_view_receipt(self):
         '''查看生成的入库单'''
@@ -236,11 +241,23 @@ class test_buy_order(TransactionCase):
         self.order.receipt_ids[0].buy_receipt_done()
         self.order.action_view_invoice()
 
+    def test_action_view_receipt(self):
+        """ 测试 查看发货/退货单 """
+        self.order.buy_order_done()
+        self.order.action_view_receipt()
 
-class test_buy_order_line(TransactionCase):
+        receipt = self.env['buy.receipt'].search(
+            [('order_id', '=', self.order.id)])
+        for line in receipt.line_in_ids:
+            line.goods_qty = 1
+        receipt.buy_receipt_done()
+        self.order.action_view_receipt()
+
+
+class TestBuyOrderLine(TransactionCase):
 
     def setUp(self):
-        super(test_buy_order_line, self).setUp()
+        super(TestBuyOrderLine, self).setUp()
         self.order = self.env.ref('buy.buy_order_1')
         self.cable = self.env.ref('goods.cable')
 
@@ -273,13 +290,6 @@ class test_buy_order_line(TransactionCase):
                 line.tax_rate = -1
             with self.assertRaises(UserError):
                 line.tax_rate = 102
-
-    def test_inverse_price(self):
-        '''由不含税价反算含税价，保存时生效'''
-        for line in self.order.line_ids:
-            line.price_taxed = 0
-            line.price = 10
-            self.assertAlmostEqual(line.price_taxed, 11.7)
 
     def test_onchange_price(self):
         '''当订单行的不含税单价改变时，改变含税单价'''
@@ -327,9 +337,9 @@ class test_buy_order_line(TransactionCase):
         '''当订单行的商品变化时，带出商品上供应商价'''
         # 添加网线的供应商价
         self.cable.vendor_ids.create({
-                'goods_id': self.cable.id,
-                'vendor_id': self.env.ref('core.lenovo').id,
-                'price': 2,})
+            'goods_id': self.cable.id,
+            'vendor_id': self.env.ref('core.lenovo').id,
+            'price': 2, })
         # 不选择供应商时，应弹出警告
         self.order.partner_id = False
         for line in self.order.line_ids:

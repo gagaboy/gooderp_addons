@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
-import json
 import logging
 from werkzeug.exceptions import Forbidden
 
@@ -16,6 +15,7 @@ _logger = logging.getLogger(__name__)
 
 PPG = 20  # Products Per Page
 PPR = 4   # Products Per Row
+
 
 class TableCompute(object):
 
@@ -89,7 +89,7 @@ class TableCompute(object):
 
 
 # class WebsiteSaleForm(WebsiteForm):
-# 
+#
 #     @http.route('/website_form/shop.sale.order', type='http', auth="public", methods=['POST'], website=True)
 #     def website_form_saleorder(self, **kwargs):
 #         model_record = request.env.ref('sale.model_sale_order')
@@ -97,11 +97,11 @@ class TableCompute(object):
 #             data = self.extract_data(model_record, kwargs)
 #         except ValidationError, e:
 #             return json.dumps({'error_fields': e.args[0]})
-# 
+#
 #         order = request.website.sale_get_order()
 #         if data['record']:
 #             order.write(data['record'])
-# 
+#
 #         if data['custom']:
 #             values = {
 #                 'body': nl2br(data['custom']),
@@ -111,10 +111,10 @@ class TableCompute(object):
 #                 'res_id': order.id,
 #             }
 #             request.env['mail.message'].sudo().create(values)
-# 
+#
 #         if data['attachments']:
 #             self.insert_attachment(model_record, order.id, data['attachments'])
-# 
+#
 #         return json.dumps({'id': order.id})
 
 
@@ -132,7 +132,9 @@ class WebsiteSale(http.Controller):
 
         attribute_ids = []
         for attribute in product.attribute_ids:
-            attribute_ids.append([attribute.id, product.attribute_ids, product.price, product.price])
+            attribute_ids.append(
+                [attribute.id, product.attribute_ids, product.price, product.price])
+
         return attribute_ids
 
     def _get_search_order(self, post):
@@ -141,13 +143,11 @@ class WebsiteSale(http.Controller):
         return 'website_published desc,%s , id desc' % post.get('order', 'website_sequence desc')
 
     def _get_search_domain(self, search, category, attrib_values):
-#         domain = request.website.sale_product_domain()
+        #         domain = request.website.sale_product_domain()
         domain = []
         if search:
             for srch in search.split(" "):
-                domain += [
-                    '|', ('name', 'ilike', srch),
-                    ('attribute_ids.default_code', 'ilike', srch)]
+                domain += [('name', 'ilike', srch)]
 
         if attrib_values:
             attrib = None
@@ -191,9 +191,11 @@ class WebsiteSale(http.Controller):
         domain = self._get_search_domain(search, category, attrib_values)
         domain += [('not_saleable', '=', False)]
 
-        keep = QueryURL('/shop', category=category and int(category), search=search, attrib=attrib_list, order=post.get('order'))
+        keep = QueryURL('/shop', category=category and int(category),
+                        search=search, attrib=attrib_list, order=post.get('order'))
 
-        request.context = dict(request.context, partner=request.env.user.gooderp_partner_id)
+        request.context = dict(
+            request.context, partner=request.env.user.gooderp_partner_id)
 
         url = "/shop"
         if search:
@@ -216,14 +218,16 @@ class WebsiteSale(http.Controller):
                 current_category = current_category.parent_id
 
         product_count = Product.search_count(domain)
-        pager = request.website.pager(url=url, total=product_count, page=page, step=ppg, scope=7, url_args=post)
+        pager = request.website.pager(
+            url=url, total=product_count, page=page, step=ppg, scope=7, url_args=post)
         products = Product.search(domain, limit=ppg, offset=pager['offset'])
 
         ProductAttribute = request.env['attribute']
         if products:
             # get all products without limit
             selected_products = Product.search(domain, limit=False)
-            attributes = ProductAttribute.search([('goods_id', 'in', selected_products.ids)])
+            attributes = ProductAttribute.search(
+                [('goods_id', 'in', selected_products.ids)])
         else:
             attributes = ProductAttribute.browse(attributes_ids)
 
@@ -266,11 +270,25 @@ class WebsiteSale(http.Controller):
         attrib_values = [map(int, v.split("-")) for v in attrib_list if v]
         attrib_set = set([v[1] for v in attrib_values])
 
-        keep = QueryURL('/shop', category=category and category.id, search=search, attrib=attrib_list)
+        keep = QueryURL('/shop', category=category and category.id,
+                        search=search, attrib=attrib_list)
 
         if not product_context.get('pricelist'):
-#             product_context['pricelist'] = pricelist.id
+            #             product_context['pricelist'] = pricelist.id
             product = product.with_context(product_context)
+
+        attribute_dict = {}
+        for attribute in product.attribute_ids:
+            for value in attribute.value_ids:
+                if not attribute_dict.has_key(value.category_id.name):
+                    attribute_dict.update(
+                        {value.category_id.name: [value.value_id.name]})
+                else:
+                    if value.value_id.name in attribute_dict[value.category_id.name]:
+                        continue
+                    else:
+                        attribute_dict[value.category_id.name].append(
+                            value.value_id.name)
 
         # 货币取当前登录用户公司对应的货币
         for user in request.env['res.users'].browse(request.uid):
@@ -286,6 +304,7 @@ class WebsiteSale(http.Controller):
             'product': product,
             'get_attribute_value_ids': self.get_attribute_value_ids,
             'currency': currency,
+            'attribute_dict': attribute_dict,
         }
         return request.render("good_shop.product", values)
 
@@ -331,7 +350,8 @@ class WebsiteSale(http.Controller):
             request.website.sale_reset()
             return {}
 
-        value = order._cart_update(product_id=product_id, line_id=line_id, add_qty=add_qty, set_qty=set_qty)
+        value = order._cart_update(
+            product_id=product_id, line_id=line_id, add_qty=add_qty, set_qty=set_qty)
         if not order.cart_quantity:
             request.website.sale_reset()
             return {}
@@ -345,21 +365,22 @@ class WebsiteSale(http.Controller):
         value['good_shop.cart_lines'] = request.env['ir.ui.view'].render_template("good_shop.cart_lines", {
             'website_sale_order': order,
             'compute_currency': lambda price: price,
-#             'suggested_products': order._cart_accessories()
+            #             'suggested_products': order._cart_accessories()
         })
         return value
+
+    def _get_mandatory_billing_fields(self):
+        return ["name", "address"]  # , "city", "country_id"
 
     @http.route(['/shop/checkout'], type='http', auth="public", website=True)
     def checkout(self, **post):
         order = request.website.sale_get_order()
-        # TODO
-        return request.redirect('/shop')
 
         redirection = self.checkout_redirection(order)
         if redirection:
             return redirection
 
-        if order.partner_id.id == request.website.user_id.sudo().partner_id.id:
+        if order.partner_id.id == request.website.user_id.sudo().gooderp_partner_id.id:
             return request.redirect('/shop/address')
 
         for f in self._get_mandatory_billing_fields():
@@ -371,20 +392,184 @@ class WebsiteSale(http.Controller):
         # Avoid useless rendering if called in ajax
         if post.get('xhr'):
             return 'ok'
-        return request.render("website_sale.checkout", values)
-    
+        return request.render("good_shop.checkout", values)
+
     # ------------------------------------------------------
     # Checkout
     # ------------------------------------------------------
 
     def checkout_redirection(self, order):
+        ''' 重定向 '''
         # must have a draft sale order with lines at this point, otherwise reset
         if not order or order.state != 'draft':
             request.session['sale_order_id'] = None
             request.session['sale_transaction_id'] = None
             return request.redirect('/shop')
 
+        # ？？？？？？？？？？？
         # if transaction pending / done: redirect to confirmation
         tx = request.env.context.get('website_sale_transaction')
         if tx and tx.state != 'draft':
             return request.redirect('/shop/payment/confirmation/%s' % order.id)
+
+    def checkout_values(self, **kw):
+        order = request.website.sale_get_order(force_create=1)
+        shippings = []
+        if order.partner_id != request.website.user_id.sudo().gooderp_partner_id:
+            Partner = order.partner_id.with_context(show_address=1).sudo()
+            shippings = Partner.search([
+                ("id", "=", order.partner_id.id),
+            ], order='id desc')
+
+        values = {
+            'order': order,
+            'shippings': shippings,
+            'only_services': order and order.only_services or False
+        }
+        return values
+
+    @http.route(['/shop/address'], type='http', methods=['GET', 'POST'], auth="public", website=True)
+    def address(self, **kw):
+        Partner = request.env['partner'].with_context(show_address=1).sudo()
+        order = request.website.sale_get_order()
+
+        redirection = self.checkout_redirection(order)
+        if redirection:
+            return redirection
+
+        mode = (False, False)
+        values, errors = {}, {}
+
+        partner_id = int(kw.get('partner_id', -1))
+
+        # IF PUBLIC ORDER
+        if order.partner_id.id == request.website.user_id.sudo().gooderp_partner_id.id:
+            mode = ('new', 'billing')
+
+        # IF ORDER LINKED TO A PARTNER
+        else:
+            if partner_id > 0:
+                if partner_id == order.partner_id.id:
+                    mode = ('edit', 'billing')
+                else:
+                    shippings = Partner.search(
+                        [('id', '=', order.partner_id.id)])
+                    if partner_id in shippings.mapped('id'):
+                        mode = ('edit', 'shipping')
+                    else:
+                        return Forbidden()
+                if mode:
+                    values = Partner.browse(partner_id)
+            elif partner_id == -1:
+                mode = ('new', 'shipping')
+            else:  # no mode - refresh without post?
+                return request.redirect('/shop/checkout')
+
+        # IF POSTED
+        if 'submitted' in kw:
+            pre_values = self.values_preprocess(order, mode, kw)
+            errors, error_msg = self.checkout_form_validate(
+                mode, kw, pre_values)
+            post, errors, error_msg = self.values_postprocess(
+                order, mode, pre_values, errors, error_msg)
+
+            if errors:
+                errors['error_message'] = error_msg
+                values = kw
+            else:
+                partner_id = self._checkout_form_save(mode, post, kw)
+
+                if mode[1] == 'billing':
+                    order.partner_id = partner_id
+                    order.onchange_partner_id()
+                elif mode[1] == 'shipping':
+                    order.partner_shipping_id = partner_id
+
+                if not errors:
+                    return request.redirect(kw.get('callback') or '/shop/checkout')
+
+        country = request.env.ref('partner_address.cn')
+        render_values = {
+            'partner_id': partner_id,
+            'mode': mode,
+            'checkout': values,
+            'country': country,
+            "states": request.env['country.state'].sudo().search([('country_id', '=', country.id)]),
+            'error': errors,
+            'callback': kw.get('callback'),
+        }
+        return request.render("good_shop.address", render_values)
+
+    def values_preprocess(self, order, mode, values):
+        return values
+
+    def values_postprocess(self, order, mode, values, errors, error_msg):
+        new_values = {}
+        for k, v in values.items():
+            # don't drop empty value, it could be a field to reset
+            new_values[k] = v
+
+        new_values['customer'] = True
+
+#         if mode == ('edit', 'billing') and order.partner_id.type == 'contact':
+#             new_values['type'] = 'other'
+#         if mode[1] == 'shipping':
+#             new_values['parent_id'] = order.partner_id.commercial_partner_id.id
+#             new_values['type'] = 'delivery'
+
+        return new_values, errors, error_msg
+
+    def checkout_form_validate(self, mode, all_form_values, data):
+        # mode: tuple ('new|edit', 'billing|shipping')
+        # all_form_values: all values before preprocess
+        # data: values after preprocess
+        error = dict()
+        error_message = []
+
+        # Required fields from form
+        required_fields = filter(
+            None, (all_form_values.get('field_required') or '').split(','))
+        # Required fields from mandatory field function
+        required_fields += mode[1] == 'shipping' and self._get_mandatory_shipping_fields(
+        ) or self._get_mandatory_billing_fields()
+
+        # error message for empty required fields
+        for field_name in required_fields:
+            if not data.get(field_name):
+                error[field_name] = 'missing'
+
+        # email validation
+        if data.get('email') and not tools.single_email_re.match(data.get('email')):
+            error["email"] = 'error'
+            error_message.append(u'请输入有效的邮箱地址！')
+
+        if [err for err in error.values() if err == 'missing']:
+            error_message.append(u'必输字段不能为空')
+
+        return error, error_message
+
+    def _checkout_form_save(self, mode, checkout, all_values):
+        Partner = request.env['partner']
+        if mode[0] == 'new':
+            partner_id = Partner.sudo().create(checkout)
+        elif mode[0] == 'edit':
+            partner_id = int(all_values.get('partner_id', 0))
+            if partner_id:
+                # double check
+                order = request.website.sale_get_order()
+                if partner_id != order.partner_id.id:
+                    return Forbidden()
+                Partner.browse(partner_id).sudo().write(checkout)
+                order.address = checkout['address']
+                order.mobile = checkout['mobile']
+        return partner_id
+
+    @http.route(['/shop/confirm_order'], type='http', auth="public", website=True)
+    def confirm_order(self, **post):
+        order = request.website.sale_get_order()
+        request.website.sell_order_to_delivery()
+
+        # 订单创建成功，清空购物车
+        redirection = self.checkout_redirection(order)
+        if redirection:
+            return request.render("good_shop.success")

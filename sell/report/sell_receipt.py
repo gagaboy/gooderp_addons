@@ -4,7 +4,7 @@ import odoo.addons.decimal_precision as dp
 from odoo import fields, models, api
 
 
-class sell_receipt(models.TransientModel):
+class SellReceipt(models.TransientModel):
     _name = 'sell.receipt'
     _description = u'销售收款一览表'
 
@@ -18,7 +18,7 @@ class sell_receipt(models.TransientModel):
     sell_amount = fields.Float(u'销售金额', digits=dp.get_precision('Amount'))
     discount_amount = fields.Float(u'优惠金额',
                                    digits=dp.get_precision('Amount'))
-    amount = fields.Float(u'优惠后金额', digits=dp.get_precision('Amount'))
+    amount = fields.Float(u'成交金额', digits=dp.get_precision('Amount'))
     partner_cost = fields.Float(u'客户承担费用', digits=dp.get_precision('Amount'))
     receipt = fields.Float(u'已收款', digits=dp.get_precision('Amount'))
     balance = fields.Float(u'应收款余额', digits=dp.get_precision('Amount'))
@@ -29,13 +29,14 @@ class sell_receipt(models.TransientModel):
     def view_detail(self):
         '''销售收款一览表查看明细按钮'''
         self.ensure_one()
-        order = self.env['sell.delivery'].search([('name', '=', self.order_name)])
+        order = self.env['sell.delivery'].search(
+            [('name', '=', self.order_name)])
         if order:
             if not order.is_return:
                 view = self.env.ref('sell.sell_delivery_form')
             else:
                 view = self.env.ref('sell.sell_return_form')
-            
+
             return {
                 'name': u'销售发货单',
                 'view_type': 'form',

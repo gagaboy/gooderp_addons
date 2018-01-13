@@ -5,7 +5,7 @@ from odoo import models, fields, api
 from odoo.exceptions import UserError
 
 
-class sell_order_detail_wizard(models.TransientModel):
+class SellOrderDetailWizard(models.TransientModel):
     _name = 'sell.order.detail.wizard'
     _description = u'销售明细表向导'
 
@@ -22,13 +22,13 @@ class sell_order_detail_wizard(models.TransientModel):
     date_end = fields.Date(u'结束日期', default=_default_date_end,
                            help=u'报表汇总的结束日期，默认为当前日期')
     partner_id = fields.Many2one('partner', u'客户',
-                                 help=u'按指定客户进行统计')
+                                 help=u'只统计选定的客户')
     goods_id = fields.Many2one('goods', u'商品',
-                               help=u'按指定商品进行统计')
+                               help=u'只统计选定的商品')
     user_id = fields.Many2one('res.users', u'销售员',
-                              help=u'按指定销售员进行统计')
+                              help=u'只统计选定的销售员')
     warehouse_id = fields.Many2one('warehouse', u'仓库',
-                                   help=u'按指定仓库进行统计')
+                                   help=u'只统计选定的仓库')
     company_id = fields.Many2one(
         'res.company',
         string=u'公司',
@@ -40,7 +40,8 @@ class sell_order_detail_wizard(models.TransientModel):
         '''向导上的确定按钮'''
         self.ensure_one()
         if self.date_end < self.date_start:
-            raise UserError(u'开始日期不能大于结束日期！\n所选开始日期:%s所选结束日期:%s'%(self.date_start, self.date_end))
+            raise UserError(u'开始日期不能大于结束日期！\n所选开始日期:%s所选结束日期:%s' %
+                            (self.date_start, self.date_end))
 
         domain = [('date', '>=', self.date_start),
                   ('date', '<=', self.date_end),
@@ -62,7 +63,7 @@ class sell_order_detail_wizard(models.TransientModel):
             'view_type': 'form',
             'view_mode': 'tree,pivot',
             'view_id': False,
-            'views': [(view.id, 'tree'),(graph_view.id,'graph')],
+            'views': [(view.id, 'tree'), (graph_view.id, 'graph'), (graph_view.id, 'pivot')],
             'res_model': 'sell.order.detail',
             'type': 'ir.actions.act_window',
             'domain': domain,

@@ -3,18 +3,20 @@ from odoo.tests.common import TransactionCase
 from odoo.exceptions import UserError, ValidationError
 
 
-class test_pos_config(TransactionCase):
+class TestPosConfig(TransactionCase):
 
     def setUp(self):
         '''准备基本数据'''
-        super(test_pos_config, self).setUp()
+        super(TestPosConfig, self).setUp()
         self.pos_config = self.env.ref('gooderp_pos.pos_config_sell')
 
     def test_create(self):
         '''创建一个POS设置'''
-        pos_config = self.env['pos.config'].create({
-            'name': u'零售测试',
-        })
+        pos_config = self.env['pos.config'].with_context({
+            'warehouse_type': 'stock'}).create({
+                'name': u'零售测试',
+            })
+        self.assertTrue(pos_config.warehouse_id.type == 'stock')
         self.assertEqual(pos_config.sequence_id.name, u'POS Order 零售测试')
 
     def test_unlink(self):
@@ -53,11 +55,11 @@ class test_pos_config(TransactionCase):
         self.assertEqual(name[0][1], real_name)
 
 
-class test_pos_session(TransactionCase):
+class TestPosSession(TransactionCase):
 
     def setUp(self):
         '''准备基本数据'''
-        super(test_pos_session, self).setUp()
+        super(TestPosSession, self).setUp()
         self.pos_config = self.env.ref('gooderp_pos.pos_config_sell')
         self.session = self.env['pos.session'].create({
             'config_id': self.pos_config.id,
@@ -70,6 +72,15 @@ class test_pos_session(TransactionCase):
             self.env['pos.session'].create({
                 'config_id': self.pos_config.id,
             })
+
+    def test_check_unicity(self):
+        '''同一个负责人不能创建两个活动会话'''
+        pos_config_2 = self.env['pos.config'].with_context({
+            'warehouse_type': 'stock'}).create({
+                'name': u'浦东店',
+            })
+        with self.assertRaises(ValidationError):
+            pos_config_2.open_session_cb()
 
     def test_unlink(self):
         '''删除会话'''
@@ -88,12 +99,33 @@ class test_pos_session(TransactionCase):
             self.session.user_id = self.env.ref('core.user_alice').id
             self.session.open_frontend_cb()
 
+    def test_action_pos_session_close(self):
+        """关闭会话"""
+        self.session.action_pos_session_close()
+        self.assertEqual(self.session.state, 'closed')
 
-class test_res_users(TransactionCase):
+    def test_create(self):
+        '''创建会话时，将pos上的付款方式填充到会话上来'''
+        self.session.action_pos_session_close()
+        pos_config = self.env['pos.config'].with_context({
+            'warehouse_type': 'stock'}).create({
+                'name': u'浦东店',
+                'bank_account_ids': [(0, 0, {
+                    'name': '支付宝',
+                    'account_id': self.env.ref('core.alipay').account_id.id,
+                    'init_balance': 1000,
+                })]
+            })
+        self.env['pos.session'].create({
+            'config_id': pos_config.id,
+        })
+
+
+class TestResUsers(TransactionCase):
 
     def setUp(self):
         '''准备基本数据'''
-        super(test_res_users, self).setUp()
+        super(TestResUsers, self).setUp()
         self.user = self.env.ref('core.user_alice')
 
     def test_check_pin(self):

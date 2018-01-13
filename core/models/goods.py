@@ -3,8 +3,13 @@ import odoo.addons.decimal_precision as dp
 from odoo import api, fields, models, _
 from odoo.exceptions import UserError
 
+CORE_COST_METHOD = [('average', u'全月一次加权平均法'),
+                    ('std',u'定额成本'),
+                    ('fifo', u'先进先出法'),
+                    ]
 
-class goods(models.Model):
+
+class Goods(models.Model):
     _name = 'goods'
     _description = u'商品'
 
@@ -21,31 +26,36 @@ class goods(models.Model):
         '''在many2one字段里显示 编号_名称'''
         res = []
 
-        for goods in self:
-            res.append((goods.id, goods.code and (
-                goods.code + '_' + goods.name) or goods.name))
+        for Goods in self:
+            res.append((Goods.id, Goods.code and (
+                Goods.code + '_' + Goods.name) or Goods.name))
         return res
 
     @api.model
     def name_search(self, name='', args=None, operator='ilike', limit=100):
         '''在many2one字段中支持按编号搜索'''
         args = args or []
+        code_search_goods = []
         if name:
             args.append(('code', 'ilike', name))
             goods_ids = self.search(args)
             if goods_ids:
-                return goods_ids.name_get()
-            else:
-                args.remove(('code', 'ilike', name))
-        return super(goods, self).name_search(name=name, args=args,
+                code_search_goods = goods_ids.name_get()
+
+            args.remove(('code', 'ilike', name))
+        search_goods = super(Goods, self).name_search(name=name, args=args,
                                               operator=operator, limit=limit)
+        for good_tup in code_search_goods: # 去除重复产品
+            if good_tup not in search_goods:
+                search_goods.append(good_tup)
+        return search_goods
 
     @api.model
     def create(self, vals):
         '''导入商品时，如果辅助单位为空，则用计量单位来填充它'''
         if not vals.get('uos_id'):
             vals.update({'uos_id': vals.get('uom_id')})
-        return super(goods, self).create(vals)
+        return super(Goods, self).create(vals)
 
     @api.multi
     def copy(self, default=None):
@@ -53,7 +63,7 @@ class goods(models.Model):
             default = {}
         if not default.has_key('name'):
             default.update(name=_('%s (copy)') % (self.name))
-        return super(goods, self).copy(default=default)
+        return super(Goods, self).copy(default=default)
 
     code = fields.Char(u'编号')
     name = fields.Char(u'名称', required=True, copy=False)
@@ -67,10 +77,14 @@ class goods(models.Model):
                              string=u'计量单位', required=True)
     uos_id = fields.Many2one('uom', ondelete='restrict', string=u'辅助单位')
     conversion = fields.Float(
-        string=u'转化率', default=1, digits=(16, 3), 
+        string=u'转化率', default=1, digits=(16, 3),
         help=u'1个辅助单位等于多少计量单位的数量，如1箱30个苹果，这里就输入30')
     cost = fields.Float(u'成本',
                         digits=dp.get_precision('Amount'))
+    cost_method = fields.Selection(CORE_COST_METHOD, u'存货计价方法',
+                                   help=u'''GoodERP仓库模块使用先进先出规则匹配
+                                   每次出库对应的入库成本和数量，但不实时记账。
+                                   财务月结时使用此方法相应调整发出成本''')
     tax_rate = fields.Float(u'税率(%)',
                             help=u'商品税率')
     not_saleable = fields.Boolean(u'不可销售',
@@ -83,13 +97,11 @@ class goods(models.Model):
         change_default=True,
         default=lambda self: self.env['res.company']._company_default_get())
     brand = fields.Many2one('core.value', u'品牌',
-                              ondelete='restrict',
-                              domain=[('type', '=', 'brand')],
-                              context={'type': 'brand'})
+                            ondelete='restrict',
+                            domain=[('type', '=', 'brand')],
+                            context={'type': 'brand'})
 
     _sql_constraints = [
         ('name_uniq', 'unique(name)', '商品不能重名'),
         ('conversion_no_zero', 'check(conversion != 0)', '商品的转化率不能为0')
     ]
-
-

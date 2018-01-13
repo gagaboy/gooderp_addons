@@ -1,6 +1,7 @@
 odoo.define('web.gooderp_dialog', function(require) {
     var crash_manager = require('web.CrashManager');
     var core = require('web.core');
+    var session = require('web.session');
     var Dialog = require('web.Dialog');
     
     // 自定义填充按钮，一个对象列表，规则如下
@@ -20,6 +21,10 @@ odoo.define('web.gooderp_dialog', function(require) {
             if (!this.active) {
                 return;
             }
+            var audio;
+            audio = new Audio();
+            audio.src = session.url("/gooderp_pos/static/src/sounds/error.wav");
+            audio.play();
             new Dialog(this, {
                 size: 'medium',
                 title: "Gooderp " + (_.str.capitalize(error.type) || core._t("Warning")),

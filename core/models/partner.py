@@ -5,7 +5,7 @@ from odoo import api, fields, models
 from odoo.exceptions import UserError
 
 
-class partner(models.Model):
+class Partner(models.Model):
     '''
     业务伙伴可能是客户： c_category_id 非空
 
@@ -73,7 +73,16 @@ class partner(models.Model):
                 return partners.name_get()
             else:
                 args.remove(('code', 'ilike', name))
-        return super(partner, self).name_search(name=name,
+        return super(Partner, self).name_search(name=name,
                                                 args=args,
                                                 operator=operator,
                                                 limit=limit)
+
+    @api.multi
+    def write(self, vals):
+        # 业务伙伴应收/应付余额不为0时，不允许取消对应的客户/供应商身份
+        if self.c_category_id and vals.get('c_category_id') == False and self.receivable != 0:
+            raise UserError(u'该客户应收余额不为0，不能取消客户类型')
+        if self.s_category_id and vals.get('s_category_id') == False and self.payable != 0:
+            raise UserError(u'该供应商应付余额不为0，不能取消供应商类型')
+        return super(Partner, self).write(vals)

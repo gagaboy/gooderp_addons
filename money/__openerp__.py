@@ -25,6 +25,7 @@
     'data': [
         'data/money_data.xml',
         'data/cash_flow_data.xml',
+        'data/export_data.xml',
         'security/groups.xml',
         'views/cash_flow_view.xml',
         'views/money_order_view.xml',
@@ -48,7 +49,7 @@
         'views/generate_accounting.xml',
         'data/home_page_data.xml',
         'report/report_data.xml',
-        'report/print.xml',
+        # 'report/print.xml',
         'report/print_money_order.xml',
     ],
     'demo': [

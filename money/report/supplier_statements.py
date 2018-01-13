@@ -3,8 +3,15 @@
 import odoo.addons.decimal_precision as dp
 from odoo import fields, models, api, tools
 
+from odoo.addons.report_docx.report.report_docx import ReportDocx, DataModelProxy
+from odoo.addons.report_docx.report import report_helper
+from docxtpl import DocxTemplate
+from odoo.tools import misc
+import tempfile
+import os
 
-class supplier_statements_report(models.Model):
+
+class SupplierStatementsReport(models.Model):
     _name = "supplier.statements.report"
     _description = u"供应商对账单"
     _auto = False
@@ -13,16 +20,11 @@ class supplier_statements_report(models.Model):
     @api.one
     @api.depends('amount', 'pay_amount', 'partner_id')
     def _compute_balance_amount(self):
-        pre_record = self.search([
-            ('id', '=', self.id - 1),
-            ('partner_id', '=', self.partner_id.id)
-        ])
         # 相邻的两条记录，partner不同，应付款余额要清零并重新计算
-        if pre_record:
-            before_balance = pre_record.balance_amount
-        else:
-            before_balance = 0
-        self.balance_amount += before_balance + self.amount - self.pay_amount + self.discount_money
+        pre_record = self.search(
+            [('id', '<=', self.id), ('partner_id', '=', self.partner_id.id)])
+        for pre in pre_record:
+            self.balance_amount += pre.amount - pre.pay_amount + self.discount_money
 
     partner_id = fields.Many2one('partner', string=u'业务伙伴', readonly=True)
     name = fields.Char(string=u'单据编号', readonly=True)
@@ -94,8 +96,143 @@ class supplier_statements_report(models.Model):
                         0 AS balance_amount,
                         Null AS note
                 FROM reconcile_order AS ro
-                LEFT JOIN money_invoice AS mi ON mi.name = ro.name
                 LEFT JOIN source_order_line AS sol ON sol.payable_reconcile_id = ro.id
-                WHERE ro.state = 'done' AND mi.state = 'done' AND mi.name ilike 'RO%'
+                WHERE ro.state = 'done' AND ro.business_type in ('get_to_pay', 'pay_to_pay')
+                UNION ALL
+                SELECT ro.to_partner_id AS partner_id,
+                        ro.name,
+                        ro.date,
+                        ro.write_date AS done_date,
+                        sol.this_reconcile AS amount,
+                        0 AS pay_amount,
+                        0 AS discount_money,
+                        0 AS balance_amount,
+                        ro.note AS note
+                FROM reconcile_order AS ro
+                LEFT JOIN source_order_line AS sol ON sol.payable_reconcile_id = ro.id
+                WHERE ro.state = 'done' AND ro.business_type = 'pay_to_pay'
                 ) AS ps)
         """)
+
+
+class IrActionReportDocx(models.Model):
+    _inherit = 'ir.actions.report.xml'
+
+    def _lookup_report(self, name):
+        self._cr.execute(
+            "SELECT * FROM ir_act_report_xml WHERE report_name=%s", (name,))
+        r = self._cr.dictfetchone()
+        if r:
+            if r['report_type'] == 'docx':
+                return ReportDocxPartner('report.' + r['report_name'], r['model'], register=False)
+
+        return super(IrActionReportDocx, self)._lookup_report(name)
+
+
+class ReportDocxPartner(ReportDocx):
+    def create(self, cr, uid, ids, data, context=None):
+        env = api.Environment(cr, uid, context)
+        report_ids = env.get('ir.actions.report.xml').search([('report_name', '=', self.name[7:])])
+        self.title = report_ids[0].name
+        if report_ids[0].report_name == 'supplier.statements.report':
+            return self.supplier_statement_report(cr, uid, ids, report_ids[0], context=context)
+        elif report_ids[0].report_name == 'customer.statements.report':
+            return self.customer_statement_report(cr, uid, ids, report_ids[0], context=context)
+
+        return super(ReportDocxPartner, self).create(cr, uid, ids, data, context)
+
+    def supplier_statement_report(self, cr, uid, ids, report_id, context=None):
+        env = api.Environment(cr, uid, context)
+        records = env.get('supplier.statements.report').search([('partner_id', '=', context.get('partner_id')),
+                                                                ('date', '>=', context.get('from_date')),
+                                                                ('date', '<=', context.get('to_date'))])
+        if records:
+            return self.create_source_docx_partner(cr, uid, ids, report_id, records, 0, context)
+        else:
+            pre_records = env.get('supplier.statements.report').search(
+                [('partner_id', '=', context.get('partner_id')),
+                 ('date', '<', context.get('from_date'))], order='id desc')
+            if pre_records:
+                init_pay = pre_records[0].balance_amount
+                return self.create_source_docx_partner(cr, uid, ids, report_id, None, init_pay, context)
+            else:
+                return self.create_source_docx_partner(cr, uid, ids, report_id, None, 0, context)
+
+    def customer_statement_report(self, cr, uid, ids, report_id, context=None):
+        env = api.Environment(cr, uid, context)
+        records = env.get('customer.statements.report').search([('partner_id', '=', context.get('partner_id')),
+                                                                ('date', '>=', context.get('from_date')),
+                                                                ('date', '<=', context.get('to_date'))])
+        if records:
+            return self.create_source_docx_partner(cr, uid, ids, report_id, records, 0, context)
+        else:
+            pre_records = env.get('customer.statements.report').search(
+                [('partner_id', '=', context.get('partner_id')),
+                 ('date', '<', context.get('from_date'))], order='id desc')
+            if pre_records:
+                init_pay = pre_records[0].balance_amount
+                return self.create_source_docx_partner(cr, uid, ids, report_id, None, init_pay, context)
+            else:
+                return self.create_source_docx_partner(cr, uid, ids, report_id, None, 0, context)
+
+    def create_source_docx_partner(self, cr, uid, ids, report, records, init_pay, context=None):
+        # 2016-11-2 支持了图片
+        # 1.导入依赖，python3语法
+        # from . import report_helper
+        # 2. 需要添加一个"tpl"属性获得模版对象
+        tempname = tempfile.mkdtemp()
+        temp_out_file = self.generate_temp_file(tempname)
+        doc = DocxTemplate(misc.file_open(report.template_file).name)
+
+        env = api.Environment(cr, uid, context)
+        partner = env.get('partner').search([('id', '=', context.get('partner_id'))])
+        simple_dict = {'partner_name': partner.name,
+                       'from_date': context.get('from_date'),
+                       'to_date': context.get('to_date'),
+                       'report_line': [],
+                       'init_pay': {},
+                       'final_pay': {}}
+        if not records:
+            if init_pay:
+                simple_dict['init_pay'] = init_pay
+                simple_dict['final_pay'] = init_pay
+            doc.render({'obj': simple_dict, 'tpl': doc}, report_helper.get_env())
+            doc.save(temp_out_file)
+
+            report_stream = ''
+            with open(temp_out_file, 'rb') as input_stream:
+                report_stream = input_stream.read()
+
+            os.remove(temp_out_file)
+            return report_stream, report.output_type
+
+        data = DataModelProxy(records)
+        for p_value in data:
+            simple_dict['report_line'].append({
+                'date': p_value.date,
+                'name': p_value.name,
+                'note': p_value.note,
+                'amount': p_value.amount,
+                'pay_amount': p_value.pay_amount,
+                'discount_money': p_value.discount_money,
+                'balance_amount': p_value.balance_amount
+            })
+        if data:
+            simple_dict['init_pay'] = data[0].balance_amount - data[0].amount + data[0].pay_amount - data[
+                0].discount_money
+            simple_dict['final_pay'] = data[-1].balance_amount
+
+        doc.render({'obj': simple_dict, 'tpl': doc}, report_helper.get_env())
+        doc.save(temp_out_file)
+
+        if report.output_type == 'pdf':
+            temp_file = self.render_to_pdf(temp_out_file)
+        else:
+            temp_file = temp_out_file
+
+        report_stream = ''
+        with open(temp_file, 'rb') as input_stream:
+            report_stream = input_stream.read()
+
+        os.remove(temp_file)
+        return report_stream, report.output_type

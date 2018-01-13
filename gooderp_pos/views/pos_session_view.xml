@@ -44,12 +44,11 @@
                     </group>
                     <separator string="付款方式汇总" attrs="{'invisible' : [('state', '=', 'opening_control')]}"/>
                     <field name="payment_line_ids" attrs="{'invisible' : [('state', '=', 'opening_control')]}">
-                        <tree string="付款明细">
+                        <tree string="付款明细" create="0" edit="0" delete="0">
                             <field name="session_id" />
-                            <field name="pay_type_id" />
-                            <field name="amount" />
+                            <field name="bank_account_id" />
+                            <field name="amount" sum="金额汇总" />
                             <field name="pay_date" />
-                            <field name="sell_id" />
                         </tree>
                     </field>
                 </sheet>
@@ -78,9 +77,9 @@
         <field name="arch" type="xml">
             <search string="POS">
                 <field name="name" />
-                <filter string="Open" domain="[('state', '=', 'opened')]" />
+                <filter string="打开" domain="[('state', '=', 'opened')]" />
                 <separator/>
-                <filter string="Today" domain="[('start_at', '>=', datetime.datetime.combine(context_today(), datetime.time(0,0,0)))]" />
+                <filter string="今日" domain="[('start_at', '>=', datetime.datetime.combine(context_today(), datetime.time(0,0,0)))]" />
                 <field name="config_id" />
                 <field name="user_id" />
                 <group expand="0" string="Group By">
@@ -113,10 +112,6 @@
          sequence="100" groups="group_pos_manager"/>
 
 
-    <menuitem
-        id="menu_pos_session_all"
-        parent="menu_gooderp_pos"
-        action="action_pos_session"
-        sequence="20"
-        groups="group_pos_manager"/>
+    <menuitem id="menu_pos_session_all" name="会话" parent="menu_gooderp_pos"
+              action="action_pos_session" sequence="40" groups="group_pos_manager"/>
 </odoo>

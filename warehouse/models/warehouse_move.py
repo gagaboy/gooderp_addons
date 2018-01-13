@@ -2,17 +2,19 @@
 
 from odoo import models, fields, api
 from odoo.exceptions import UserError
-class wh_move(models.Model):
+
+
+class WhMove(models.Model):
     _name = 'wh.move'
     _description = u'移库单'
 
     MOVE_STATE = [
         ('draft', u'草稿'),
         ('done', u'已审核'),
-    ]
-    
+        ('cancel', u'已作废'),]
+
     @api.one
-    @api.depends('line_out_ids','line_in_ids')
+    @api.depends('line_out_ids', 'line_in_ids')
     def _compute_total_qty(self):
         goods_total = 0
         if self.line_in_ids:
@@ -27,13 +29,13 @@ class wh_move(models.Model):
     def _get_default_warehouse_impl(self):
         if self.env.context.get('warehouse_type', 'stock'):
             return self.env['warehouse'].get_warehouse_by_type(
-                    self.env.context.get('warehouse_type', 'stock'))
+                self.env.context.get('warehouse_type', 'stock'))
 
     @api.model
     def _get_default_warehouse_dest_impl(self):
         if self.env.context.get('warehouse_dest_type', 'stock'):
             return self.env['warehouse'].get_warehouse_by_type(
-                    self.env.context.get('warehouse_dest_type', 'stock'))
+                self.env.context.get('warehouse_dest_type', 'stock'))
 
     @api.model
     def _get_default_warehouse(self):
@@ -49,8 +51,11 @@ class wh_move(models.Model):
                          help=u'移库类型')
     name = fields.Char(u'单据编号', copy=False, default='/',
                        help=u'单据编号，创建时会自动生成')
+    ref = fields.Char(u'外部单号')
     state = fields.Selection(MOVE_STATE, u'状态', copy=False, default='draft',
-                             help=u'移库单状态标识，新建时状态为未审核;审核后状态为已审核')
+                             index=True,
+                             help=u'移库单状态标识，新建时状态为未审核;审核后状态为已审核',
+                             track_visibility='onchange')
     partner_id = fields.Many2one('partner', u'业务伙伴', ondelete='restrict',
                                  help=u'该单据对应的业务伙伴')
     date = fields.Date(u'单据日期', required=True, copy=False, default=fields.Date.context_today,
@@ -59,6 +64,7 @@ class wh_move(models.Model):
                                    ondelete='restrict',
                                    required=True,
                                    readonly=True,
+                                   domain="['|',('user_ids','=',False),('user_ids','in',uid)]",
                                    states={'draft': [('readonly', False)]},
                                    default=_get_default_warehouse,
                                    help=u'移库单的来源仓库')
@@ -66,6 +72,7 @@ class wh_move(models.Model):
                                         ondelete='restrict',
                                         required=True,
                                         readonly=False,
+                                        domain="['|',('user_ids','=',False),('user_ids','in',uid)]",
                                         states={'done': [('readonly', True)]},
                                         default=_get_default_warehouse_dest,
                                         help=u'移库单的目的仓库')
@@ -74,7 +81,8 @@ class wh_move(models.Model):
                                   help=u'移库单的审核人')
     approve_date = fields.Datetime(u'审核日期', copy=False)
     line_out_ids = fields.One2many('wh.move.line', 'move_id', u'出库明细',
-                                   domain=[('type', 'in', ['out', 'internal'])],
+                                   domain=[
+                                       ('type', 'in', ['out', 'internal'])],
                                    copy=True,
                                    help=u'出库类型的移库单对应的出库明细')
     line_in_ids = fields.One2many('wh.move.line', 'move_id', u'入库明细',
@@ -93,7 +101,10 @@ class wh_move(models.Model):
         states={'done': [('readonly', True)]},
         default=lambda self: self.env.user,
         help=u'单据经办人',
+        track_visibility='onchange'
     )
+    express_type = fields.Char(string='承运商')
+    express_code = fields.Char(u'快递单号', copy=False)
     company_id = fields.Many2one(
         'res.company',
         string=u'公司',
@@ -138,12 +149,13 @@ class wh_move(models.Model):
         loop_field = 'line_in_ids' if val['type'] == 'in' else 'line_out_ids'
         for line in move[loop_field]:
             line.cost_unit = (line.goods_id.price if val['type'] in ['out', 'internal']
-                              else line.goods_id.cost) # 其他出入库单 、内部调拨单
+                              else line.goods_id.cost)  # 其他出入库单 、内部调拨单
             line.price_taxed = (line.goods_id.price if val['type'] == 'out'
-                                else line.goods_id.cost) # 采购或销售单据
+                                else line.goods_id.cost)  # 采购或销售单据
             # 如果商品属性或商品上存在条码，且明细行上已经存在该商品，则数量累加
             if (att and line.attribute_id == att) or (goods and line.goods_id == goods):
-                create_line = self.scan_barcode_move_line_operation(line, conversion)
+                create_line = self.scan_barcode_move_line_operation(
+                    line, conversion)
         return create_line
 
     def scan_barcode_inventory_operation(self, move, att, conversion, goods, val):
@@ -152,12 +164,13 @@ class wh_move(models.Model):
         for line in move.line_ids:
             # 如果商品属性上存在条码 或 商品上存在条码
             if (att and line.attribute_id == att) or (goods and line.goods_id == goods):
-                create_line = self.scan_barcode_inventory_line_operation(line, conversion)
+                create_line = self.scan_barcode_inventory_line_operation(
+                    line, conversion)
         return create_line
 
-    def scan_barcode_each_model_operation(self, model_name, order_id, att, goods,conversion):
+    def scan_barcode_each_model_operation(self, model_name, order_id, att, goods, conversion):
         val = {}
-        create_line = False # 是否创建新的明细行
+        create_line = False  # 是否创建新的明细行
         order = self.env[model_name].browse(order_id)
         if model_name in ['wh.out', 'wh.in', 'wh.internal']:
             move = order.move_id
@@ -179,15 +192,37 @@ class wh_move(models.Model):
         if model_name == 'wh.internal':
             val['type'] = 'internal'
         if model_name != 'wh.inventory':
-            create_line = self.scan_barcode_move_in_out_operation(move, att, conversion, goods,val)
+            create_line = self.scan_barcode_move_in_out_operation(
+                move, att, conversion, goods, val)
 
         # 盘点单的扫码
         if model_name == 'wh.inventory':
             move = order
             val['type'] = 'out'
-            create_line = self.scan_barcode_inventory_operation(move, att, conversion, goods, val)
+            create_line = self.scan_barcode_inventory_operation(
+                move, att, conversion, goods, val)
 
         return move, create_line, val
+
+    @api.multi
+    def check_goods_qty(self, goods, attribute, warehouse):
+        '''SQL来取指定商品，属性，仓库，的当前剩余数量'''
+
+        if attribute:
+            change_conditions = "AND line.attribute_id = %s" % attribute.id
+        elif goods:
+            change_conditions = "AND line.goods_id = %s" % goods.id
+        else:
+            change_conditions = "AND 1 = 0"
+        self.env.cr.execute('''
+                       SELECT sum(line.qty_remaining) as qty
+                       FROM wh_move_line line
+
+                       WHERE line.warehouse_dest_id = %s
+                             AND line.state = 'done'
+                             %s
+                   ''' % (warehouse.id, change_conditions,))
+        return self.env.cr.fetchone()
 
     def prepare_move_line_data(self, att, val, goods, move):
         """
@@ -204,7 +239,8 @@ class wh_move(models.Model):
         conversion = goods.conversion
         # 采购入库取成本价，销售退货取销售价;采购退货取成本价，销售发货取销售价
         price_taxed = move._name == 'buy.receipt' and goods.cost or goods.price
-        cost_unit = val['type'] == 'out' and 0 or goods.cost/(1 + tax_rate*0.01)
+        cost_unit = val['type'] == 'out' and 0 or goods.cost / \
+            (1 + tax_rate * 0.01)
 
         val.update({
             'goods_id': goods_id,
@@ -238,7 +274,7 @@ class wh_move(models.Model):
         pass
 
     @api.model
-    def scan_barcode(self,model_name,barcode,order_id):
+    def scan_barcode(self, model_name, barcode, order_id):
         """
         扫描条码
         :param model_name: 模型名
@@ -246,7 +282,7 @@ class wh_move(models.Model):
         :param order_id: 单据id
         :return:
         """
-        att = self.env['attribute'].search([('ean','=',barcode)])
+        att = self.env['attribute'].search([('ean', '=', barcode)])
         goods = self.env['goods'].search([('barcode', '=', barcode)])
         line_model = (model_name == 'wh.inventory' and 'wh.inventory.line'
                       or 'wh.move.line')
@@ -256,17 +292,11 @@ class wh_move(models.Model):
         else:
             self.check_barcode(model_name, order_id, att, goods)
             conversion = att and att.goods_id.conversion or goods.conversion
-            move, create_line, val = self.scan_barcode_each_model_operation(model_name, order_id, att, goods,conversion)
+            move, create_line, val = self.scan_barcode_each_model_operation(
+                model_name, order_id, att, goods, conversion)
             if not create_line:
-                self.env[line_model].create(self.prepare_move_line_data(att, val, goods, move))
-
-    @api.multi
-    def unlink(self):
-        for move in self:
-            if move.state == 'done':
-                raise UserError(u'不可以删除已经完成的单据')
-
-            return super(wh_move, self).unlink()
+                self.env[line_model].create(
+                    self.prepare_move_line_data(att, val, goods, move))
 
     def check_qc_result(self):
         """
@@ -302,10 +332,10 @@ class wh_move(models.Model):
             order.line_in_ids.action_done()
 
         return self.write({
-                'approve_uid': self.env.uid,
-                'approve_date': fields.Datetime.now(self),
-                'state': 'done',
-            })
+            'approve_uid': self.env.uid,
+            'approve_date': fields.Datetime.now(self),
+            'state': 'done',
+        })
 
     def prev_cancel_approved_order(self):
         pass
@@ -322,34 +352,13 @@ class wh_move(models.Model):
             order.line_in_ids.action_cancel()
 
         return self.write({
-                'approve_uid': False,
-                'approve_date': False,
-                'state': 'draft',
-            })
-
-
-    @api.multi
-    def check_goods_qty(self, goods, attribute, warehouse):
-        '''SQL来取指定商品，属性，仓库，的当前剩余数量'''
-
-        if attribute:
-            change_conditions = "AND line.attribute_id = %s" % attribute.id
-        elif goods:
-            change_conditions = "AND line.goods_id = %s" % goods.id
-        else:
-            change_conditions = "AND 1 = 0"
-        self.env.cr.execute('''
-                       SELECT sum(line.qty_remaining) as qty
-                       FROM wh_move_line line
-
-                       WHERE line.warehouse_dest_id = %s
-                             AND line.state = 'done'
-                             %s
-                   ''' % (warehouse.id, change_conditions,))
-        return self.env.cr.fetchone()
+            'approve_uid': False,
+            'approve_date': False,
+            'state': 'draft',
+        })
 
     @api.multi
-    def create_zero_wh_in(self,wh_in,model_name):
+    def create_zero_wh_in(self, wh_in, model_name):
         """
         创建一个缺货向导
         :param wh_in: 单据实例
@@ -363,10 +372,11 @@ class wh_move(models.Model):
         for line in wh_in.line_out_ids:
             if line.goods_id.no_stock:
                 continue
-            result = self.check_goods_qty(line.goods_id, line.attribute_id, wh_in.warehouse_id)
+            result = self.check_goods_qty(
+                line.goods_id, line.attribute_id, wh_in.warehouse_id)
             result = result[0] or 0
             if line.goods_qty > result and not line.lot_id and not self.env.context.get('wh_in_line_ids'):
-                #在销售出库时如果临时缺货，自动生成一张盘盈入库单
+                # 在销售出库时如果临时缺货，自动生成一张盘盈入库单
                 if (line.goods_id.id, line.attribute_id.id) in goods_list:
                     continue
                 goods_list.append((line.goods_id.id, line.attribute_id.id))
@@ -374,15 +384,15 @@ class wh_move(models.Model):
                 if line.attribute_id:
                     all_line_message += u' 型号%s' % line.attribute_id.name
                 line_in_ids.append((0, 0, {
-                            'goods_id': line.goods_id.id,
-                            'attribute_id': line.attribute_id.id,
-                            'goods_uos_qty': 0,
-                            'uos_id': line.uos_id.id,
-                            'goods_qty': 0,
-                            'uom_id': line.uom_id.id,
-                            'cost_unit': line.goods_id.cost / (1 + line.goods_id.tax_rate * 0.01),
-                            'state': 'done',
-                            'date': today}))
+                    'goods_id': line.goods_id.id,
+                    'attribute_id': line.attribute_id.id,
+                    'goods_uos_qty': 0,
+                    'uos_id': line.uos_id.id,
+                    'goods_qty': 0,
+                    'uom_id': line.uom_id.id,
+                    'cost_unit': line.goods_id.cost / (1 + line.goods_id.tax_rate * 0.01),
+                    'state': 'done',
+                    'date': today}))
                 all_line_message += u" 当前库存量不足，继续出售请点击确定，并及时盘点库存\n"
 
             if line.goods_qty <= 0 or line.price_taxed < 0:

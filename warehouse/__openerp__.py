@@ -25,7 +25,7 @@
     "author": 'ZhengXiang',
     "website": "http://www.osbzr.com",
     "category": "Generic Modules",
-    "depends": ['goods', 'web_float_limit','money'],
+    "depends": ['goods', 'web_float_limit', 'money'],
     "description":
     '''
                         该模块实现了 GoodERP 中 仓库管理的功能。
@@ -46,6 +46,7 @@
     "data": [
         'data/warehouse_data.xml',
         'security/groups.xml',
+        'security/rules.xml',
         'wizard/save_bom_view.xml',
         'wizard/stock_transceive_wizard_view.xml',
         'wizard/non_active_report_wizard.xml',
@@ -67,7 +68,7 @@
     ],
     'demo': [
         'data/warehouse_demo.xml',
-     ],
+    ],
     'installable': True,
     "active": False,
 }

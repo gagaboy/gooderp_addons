@@ -3,7 +3,8 @@
 import odoo.addons.decimal_precision as dp
 from odoo import fields, models, api
 
-class sell_order_track(models.TransientModel):
+
+class SellOrderTrack(models.TransientModel):
     _name = 'sell.order.track'
     _description = u'销售订单跟踪表'
 
@@ -23,6 +24,7 @@ class sell_order_track(models.TransientModel):
     delivery_date = fields.Date(u'要求交货日期')
     wh_out_date = fields.Date(u'出库日期')
     note = fields.Char(u'备注')
+    type = fields.Selection([('sell', u'销货'), ('return', u'退货')], string=u'单据类型')
 
     @api.multi
     def view_detail(self):

@@ -5,17 +5,21 @@ from odoo.exceptions import UserError
 
 class TestProduction(TransactionCase):
     ''' 测试组装单和拆卸单 '''
+
     def setUp(self):
         super(TestProduction, self).setUp()
 
-        self.env.ref('core.goods_category_1').account_id = self.env.ref('finance.account_goods').id
+        self.env.ref('core.goods_category_1').account_id = self.env.ref(
+            'finance.account_goods').id
         self.env.ref('warehouse.wh_in_whin0').date = '2016-02-06'
 
         self.assembly = self.browse_ref('warehouse.wh_assembly_ass0')
         self.assembly_mutli = self.browse_ref('warehouse.wh_assembly_ass1')
 
-        self.assembly_mutli_keyboard_mouse_1 = self.browse_ref('warehouse.wh_move_line_ass2')
-        self.assembly_mutli_keyboard_mouse_2 = self.browse_ref('warehouse.wh_move_line_ass3')
+        self.assembly_mutli_keyboard_mouse_1 = self.browse_ref(
+            'warehouse.wh_move_line_ass2')
+        self.assembly_mutli_keyboard_mouse_2 = self.browse_ref(
+            'warehouse.wh_move_line_ass3')
 
         self.disassembly = self.browse_ref('warehouse.wh_disassembly_dis1')
         self.disassembly_bom = self.browse_ref('warehouse.wh_bom_0')
@@ -24,6 +28,14 @@ class TestProduction(TransactionCase):
         self.disassembly_keyboard = self.browse_ref('warehouse.wh_move_line_9')
 
         self.overage_in = self.browse_ref('warehouse.wh_in_whin0')
+        in_mouse_1 = self.env.ref('warehouse.wh_move_line_12')
+        in_mouse_1.cost = in_mouse_1.cost_unit * in_mouse_1.goods_qty
+        in_mouse_2 = self.env.ref('warehouse.wh_move_line_mouse_2')
+        in_mouse_2.cost = in_mouse_2.cost_unit * in_mouse_2.goods_qty
+        in_keyboard = self.env.ref('warehouse.wh_move_line_13')
+        in_keyboard.cost = in_keyboard.cost_unit * in_keyboard.goods_qty
+        in_cable = self.env.ref('warehouse.wh_move_line_14')
+        in_cable.cost = in_cable.cost_unit * in_cable.goods_qty
         self.overage_in.approve_order()
 
         self.outsource_out1 = self.browse_ref('warehouse.outsource_out1')
@@ -41,6 +53,61 @@ class TestProduction(TransactionCase):
 
         self.assertEqual(self.assembly.state, 'done')
         self.assertEqual(self.disassembly.state, 'done')
+
+    def test_assembly_apporve_exist_scape(self):
+        # 组装单成品入库存在报废
+        self.assembly_mutli.approve_feeding()
+        self.assembly_mutli_keyboard_mouse_1.goods_qty = 10
+        self.assembly_mutli_keyboard_mouse_2.scrap = True
+        # 请在公司上输入 废品库
+        with self.assertRaises(UserError):
+            self.assembly_mutli.approve_order()
+
+        self.env.user.company_id.wh_scrap_id = self.env.ref('warehouse.bj_stock').id
+        self.assembly_mutli.approve_order()
+
+    def test_disassembly_apporve_exist_scape(self):
+        # 拆卸单子产品入库存在报废
+        # 先组装，后拆卸可以正常出入库
+        self.assembly.approve_feeding()
+        self.assembly.approve_order()
+
+        self.disassembly.approve_feeding()
+        self.disassembly_mouse.scrap = True
+        self.env.user.company_id.wh_scrap_id = self.env.ref('warehouse.bj_stock').id
+        self.disassembly.approve_order()
+
+    def test_outsource_apporve_exist_scape(self):
+        # 拆卸单子产品入库存在报废
+        self.outsource_out1.approve_feeding()
+        keyboard_mouse = self.env.ref('warehouse.wh_move_line_out3')
+        keyboard_mouse.scrap = True
+        self.env.user.company_id.wh_scrap_id = self.env.ref('warehouse.bj_stock').id
+        self.outsource_out1.approve_order()
+
+    def test_check_is_child_enable_assembly(self):
+        # 组装 子件中不能包含与组合件中相同的 产品+属性
+        mouse_line = self.env.ref('warehouse.wh_move_line_3')
+        mouse_line.goods_id = self.env.ref('goods.mouse').id
+
+        with self.assertRaises(UserError):
+            self.assembly.approve_feeding()
+
+    def test_check_is_child_enable_disassembly(self):
+        # 拆卸 子件中不能包含与组合件中相同的 产品+属性
+        mouse_line = self.env.ref('warehouse.wh_move_line_7')
+        mouse_line.goods_id = self.env.ref('goods.mouse').id
+
+        with self.assertRaises(UserError):
+            self.disassembly.approve_feeding()
+
+    def test_check_is_child_enable_outsource(self):
+        # 委外加工单 子件中不能包含与组合件中相同的 产品+属性
+        mouse_line = self.env.ref('warehouse.wh_move_line_out3')
+        mouse_line.goods_id = self.env.ref('goods.mouse').id
+
+        with self.assertRaises(UserError):
+            self.outsource_out1.approve_feeding()
 
     def test_cancel(self):
         self.assembly.approve_feeding()
@@ -80,11 +147,11 @@ class TestProduction(TransactionCase):
 
         self.disassembly.cancel_approved_order()
 #         self.assembly.cancel_approved_order()
-# 
+#
 #         # 反审核后可以被删除掉
 #         self.assembly.unlink()
 #         self.disassembly.unlink()
-# 
+#
 #         # 删除后的单据应该不存在
 #         self.assertTrue(not self.disassembly.exists())
 #         self.assertTrue(not self.assembly.exists())
@@ -147,7 +214,7 @@ class TestProduction(TransactionCase):
         ''' 测试 拆卸单 没有费用 子件成本 '''
         self.assembly.fee = 100
         self.assembly.approve_feeding()
-        self.assembly.approve_order() # 指定组装费用为100，此时成本应该为150
+        self.assembly.approve_order()  # 指定组装费用为100，此时成本应该为150
         self.disassembly.approve_feeding()
         self.disassembly.approve_order()
 
@@ -159,7 +226,7 @@ class TestProduction(TransactionCase):
         ''' 测试 拆卸单 费用分配到 子件成本 '''
         self.assembly.fee = 100
         self.assembly.approve_feeding()
-        self.assembly.approve_order() # 指定组装费用为100，此时成本应该为150
+        self.assembly.approve_order()  # 指定组装费用为100，此时成本应该为150
 
         self.disassembly.fee = 120
         self.disassembly.approve_feeding()
@@ -205,7 +272,8 @@ class TestProduction(TransactionCase):
 
     def test_bom(self):
         # 创建一个新的临时bom
-        self.assembly.bom_id = self.env['wh.bom'].create({'name': 'temp', 'type': 'assembly'})
+        self.assembly.bom_id = self.env['wh.bom'].create(
+            {'name': 'temp', 'type': 'assembly'})
 
         # 将当前的组装单保存的临时bom上去
         self.assembly.update_bom()
@@ -249,28 +317,38 @@ class TestProduction(TransactionCase):
         # self._test_disassembly_bom_by_results(self.disassembly, self.disassembly.bom_id, results['value'])
 
     def _test_assembly_bom_by_results(self, assembly, bom, results):
-        self._test_bom(assembly, bom, parent_results=results['line_in_ids'], child_results=results['line_out_ids'])
+        self._test_bom(
+            assembly, bom, parent_results=results['line_in_ids'], child_results=results['line_out_ids'])
 
     def _test_disassembly_bom_by_results(self, disassembly, bom, results):
-        self._test_bom(disassembly, bom, parent_results=results['line_out_ids'], child_results=results['line_in_ids'])
+        self._test_bom(
+            disassembly, bom, parent_results=results['line_out_ids'], child_results=results['line_in_ids'])
 
     def _test_assembly_bom(self, assembly, bom):
-        self._test_bom(assembly, bom, parent_attr='line_in_ids', child_attr='line_out_ids')
+        self._test_bom(assembly, bom, parent_attr='line_in_ids',
+                       child_attr='line_out_ids')
 
     def _test_disassembly_bom(self, disassembly, bom):
-        self._test_bom(disassembly, bom, parent_attr='line_out_ids', child_attr='line_in_ids')
+        self._test_bom(disassembly, bom,
+                       parent_attr='line_out_ids', child_attr='line_in_ids')
 
     def _test_bom(self, assembly, bom, parent_attr='line_in_ids', child_attr='line_out_ids',
                   parent_results=None, child_results=None):
-        bom_parent_ids = [(parent.goods_id.id, parent.goods_qty) for parent in bom.line_parent_ids]
-        bom_child_ids = [(child.goods_id.id, child.goods_qty) for child in bom.line_child_ids]
+        bom_parent_ids = [(parent.goods_id.id, parent.goods_qty)
+                          for parent in bom.line_parent_ids]
+        bom_child_ids = [(child.goods_id.id, child.goods_qty)
+                         for child in bom.line_child_ids]
 
         if parent_results and child_results:
-            assembly_parent_ids = [(parent[2]['goods_id'], parent[2]['goods_qty']) for parent in parent_results]
-            assembly_child_ids = [(child[2]['goods_id'], child[2]['goods_qty']) for child in child_results]
+            assembly_parent_ids = [
+                (parent[2]['goods_id'], parent[2]['goods_qty']) for parent in parent_results]
+            assembly_child_ids = [
+                (child[2]['goods_id'], child[2]['goods_qty']) for child in child_results]
         else:
-            assembly_parent_ids = [(parent.goods_id.id, parent.goods_qty) for parent in getattr(assembly, parent_attr)]
-            assembly_child_ids = [(child.goods_id.id, child.goods_qty) for child in getattr(assembly, child_attr)]
+            assembly_parent_ids = [(parent.goods_id.id, parent.goods_qty)
+                                   for parent in getattr(assembly, parent_attr)]
+            assembly_child_ids = [(child.goods_id.id, child.goods_qty)
+                                  for child in getattr(assembly, child_attr)]
 
         self.assertEqual(len(bom_parent_ids), len(assembly_parent_ids))
         self.assertEqual(len(bom_child_ids), len(assembly_child_ids))
@@ -285,16 +363,16 @@ class TestProduction(TransactionCase):
         ''' 测试 onchange_goods_id '''
         # 组装单 onchange_goods_id
         wh_assembly_ass2 = self.browse_ref('warehouse.wh_assembly_ass2')
-        wh_assembly_ass2.goods_id =  self.env.ref('goods.keyboard_mouse').id
+        wh_assembly_ass2.goods_id = self.env.ref('goods.keyboard_mouse').id
         wh_assembly_ass2.onchange_goods_id()
 
         # 委外加工单 onchange_goods_id
-        self.outsource_out1.goods_id =  self.env.ref('goods.keyboard_mouse')
+        self.outsource_out1.goods_id = self.env.ref('goods.keyboard_mouse')
         self.outsource_out1.onchange_goods_id()
 
         # 拆卸单 onchange_goods_id
         wh_disassembly_dis3 = self.browse_ref('warehouse.wh_disassembly_dis3')
-        wh_disassembly_dis3.goods_id =  self.env.ref('goods.keyboard_mouse').id
+        wh_disassembly_dis3.goods_id = self.env.ref('goods.keyboard_mouse').id
         wh_disassembly_dis3.onchange_goods_id()
 
     def test_assembly_onchange_goods_qty(self):
@@ -303,7 +381,7 @@ class TestProduction(TransactionCase):
         wh_assembly_ass2 = self.browse_ref('warehouse.wh_assembly_ass2')
         wh_assembly_ass2.goods_qty = 2
         wh_assembly_ass2.onchange_goods_qty()
-        
+
         # self.line_in_ids
         wh_assembly_ass0 = self.browse_ref('warehouse.wh_assembly_ass0')
         wh_assembly_ass0.goods_qty = 2
@@ -361,18 +439,19 @@ class TestProduction(TransactionCase):
         # has bom_id, line_in_ids > 1
         wh_bom = self.env.ref('warehouse.wh_bom_0')
         wh_bom.line_parent_ids.create({
-                                       'bom_id': self.env.ref('warehouse.wh_bom_0').id,
-                                       'type': 'parent',
-                                       'goods_id': self.env.ref('goods.cable').id,
-                                       'goods_qty': 1
-                                       })
+            'bom_id': self.env.ref('warehouse.wh_bom_0').id,
+            'type': 'parent',
+            'goods_id': self.env.ref('goods.cable').id,
+            'goods_qty': 1
+        })
         self.outsource_out1.bom_id = wh_bom.id
         self.outsource_out1.onchange_bom()
         self.assertTrue(self.outsource_out1.is_many_to_many_combinations)
 
     def test_outsource_approve_feeding(self):
         ''' 测试  委外加工单 审核: 存在委外费用生成结算单 '''
-        self.outsource_out1.outsource_partner_id = self.env.ref('core.lenovo').id
+        self.outsource_out1.outsource_partner_id = self.env.ref(
+            'core.lenovo').id
         self.outsource_out1.approve_feeding()
         self.outsource_out1.approve_order()
 
@@ -385,14 +464,16 @@ class TestProduction(TransactionCase):
 
     def test_outsource_approve_order_has_fee(self):
         ''' 测试  委外加工单 审核: 存在委外费用生成结算单 '''
-        self.outsource_out1.outsource_partner_id = self.env.ref('core.lenovo').id
+        self.outsource_out1.outsource_partner_id = self.env.ref(
+            'core.lenovo').id
         self.outsource_out1.outsource_fee = 100
         self.outsource_out1.approve_feeding()
         self.outsource_out1.approve_order()
 
     def test_outsource_cancel_approved_order(self):
         ''' 测试  委外加工单 反审核 '''
-        self.outsource_out1.outsource_partner_id = self.env.ref('core.lenovo').id
+        self.outsource_out1.outsource_partner_id = self.env.ref(
+            'core.lenovo').id
         self.outsource_out1.outsource_fee = 100
         self.outsource_out1.approve_feeding()
         self.outsource_out1.approve_order()
@@ -405,9 +486,9 @@ class TestProduction(TransactionCase):
     def test_outsource_create(self):
         ''' 测试  委外加工单 创建 '''
         self.outsource_out1.create({
-                                    'outsource_partner_id': self.env.ref('core.lenovo').id,
-                                    'outsource_fee': 10,
-                                    })
+            'outsource_partner_id': self.env.ref('core.lenovo').id,
+            'outsource_fee': 10,
+        })
 
     def test_outsource_approve_order_no_feeding(self):
         ''' 测试 委外加工单 审核 没有投料 就审核 '''
@@ -452,11 +533,11 @@ class TestProduction(TransactionCase):
         wh_bom = self.env.ref('warehouse.wh_bom_0')
         wh_bom.type = 'assembly'
         wh_bom.line_parent_ids.create({
-                                       'bom_id': self.env.ref('warehouse.wh_bom_0').id,
-                                       'type': 'parent',
-                                       'goods_id': self.env.ref('goods.cable').id,
-                                       'goods_qty': 1
-                                       })
+            'bom_id': self.env.ref('warehouse.wh_bom_0').id,
+            'type': 'parent',
+            'goods_id': self.env.ref('goods.cable').id,
+            'goods_qty': 1
+        })
 
         wh_assembly_ass0.bom_id = wh_bom.id
         wh_assembly_ass0.onchange_bom()
@@ -487,11 +568,11 @@ class TestProduction(TransactionCase):
 
         wh_bom = self.env.ref('warehouse.wh_bom_0')
         wh_bom.line_parent_ids.create({
-                                       'bom_id': self.env.ref('warehouse.wh_bom_0').id,
-                                       'type': 'parent',
-                                       'goods_id': self.env.ref('goods.cable').id,
-                                       'goods_qty': 1
-                                       })
+            'bom_id': self.env.ref('warehouse.wh_bom_0').id,
+            'type': 'parent',
+            'goods_id': self.env.ref('goods.cable').id,
+            'goods_qty': 1
+        })
 
         self.bom_id = self.disassembly_bom.id
         wh_disassembly_dis3.bom_id = wh_bom.id

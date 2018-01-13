@@ -35,6 +35,7 @@ odoo.define('core.core', function (require) {
             });
         },
         pad_table_to: function (count) {
+            count -=3;    /* 表格预留空行太多很难看 */
             if (this.records.length >= count ||
                 _(this.columns).any(function (column) { return column.meta; })) {
                 return;
@@ -117,28 +118,12 @@ odoo.define('core.core', function (require) {
             this._super.apply(this, arguments);
         },
     });
-    /**2016-11-15 开阖静静(gilbert@osbzr.com)
-    *在页面的 表头部分 添加公司图标 及公司名称
-     */
-    UserMenu.include({
-          do_update: function () {
-            var self =this;
-            this._super.apply(this, arguments);
-            var $company_avatar = this.$('.oe_top_company_bar_avatar');
-            if (!session.uid) {
-                $company_avatar.attr('src', $company_avatar.data('default-src'));
-                return $.when();
-            }
-            new Model("res.company").call("read", [session.company_id]).then(function(data) {
-                self.$('.oe_topbar_company_name').text(data[0]['display_name']);
-            })
-            var company_avatar_src = session.url('/web/image', {model:'res.company', field: 'logo', id:session.company_id});
-            $company_avatar.attr('src', company_avatar_src);
-        },
-    });
+
     /**
      * 2016-11-15 开阖静静(gilbert@osbzr.com)
      * 把设置默认值的的按钮菜单 放到form菜单的更多里面。
+     * 2017-12-21 Sam(lgz.sam@qq.com)
+     * form view中有input设置autofoucs=true，优先设置input获取焦点
     */
     FormView.include({
        render_sidebar: function($node) {
@@ -154,24 +139,20 @@ odoo.define('core.core', function (require) {
         on_click_set_defaults:function() {
             this.open_defaults_dialog();
         },
-    });
-    /**2016-11-09  开阖静静(gilbert@osbzr.com)
-     * 頁面title 換成自己定義的字符！
-     */
 
-    WebClient.include({
-         init: function(parent) {
-                this._super(parent);
-                this.set('title_part', {"zopenerp": "GoodERP"});
-         },
-        set_title_part: function(part, title) {
-            var tmp = _.clone(this.get("title_part"));
-            tmp[part] = title;
-            if ('zopenerp' in tmp){
-                tmp['zopenerp'] = 'GoodERP';
+        autofocus: function() {
+            this._super.apply(this, arguments);
+
+            var input_widgets = $(':input')
+            for (var i = 0; i < input_widgets.length; i += 1){
+                var input_widget = input_widgets[i]
+                if (input_widget.autofocus) {
+                    if (input_widget.focus() !== false) {
+                        break;
+                    }
+                }
             }
-            this.set("title_part", tmp);
-        },
+        }
     });
     /**2016-11-23  开阖静静(gilbert@osbzr.com)
     * pivot 视图改造 (在pivot 视图中 特殊颜色 标示满足条件的字段) 只需要在对应的字段上例如

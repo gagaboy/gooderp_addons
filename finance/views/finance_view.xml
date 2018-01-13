@@ -33,7 +33,8 @@
                 <form string="会计凭证">
 	                <header>
 	                	<button name='voucher_done' states="draft" string="审核" type="object" class="oe_highlight"/>
-	                	<button name='voucher_draft' states="done" string="反审核" type="object"/>
+                        <button name='voucher_can_be_draft' states="done" string="反审核" type="object"/>
+                        <button name="action_cancel" states="draft" string="作废" type="object"/>
 	                    <field name="state" widget="statusbar" readonly="1"/>
 	                </header>
                     <sheet>
@@ -41,6 +42,7 @@
                             <group>
                                 <field name="document_word_id"  widget='selection' readonly='1' />
                                 <field name="name"  readonly='1'  style="width: 30%%"/>
+                                <field name="ref" groups='base.group_no_one'/>
                             </group>
                             <group>
                                 <field name="date"/>
@@ -88,12 +90,10 @@
             <field name="name">voucher.tree</field>
             <field name="model">voucher</field>
             <field name="arch" type="xml">
-                <tree string="会计凭证" colors="blue:state == 'draft';">
-                    <field name="document_word_id"/>
-                    <field name="date"/>
-                    <field name="name"/>
-                    <field name="att_count"/>
+                <tree string="会计凭证" colors='blue:state == "draft";lightgray:state == "cancel"'>
                     <field name="period_id"/>
+                    <field name="name"/>
+                    <field name="date"/>
                     <field name="amount_text" widget="bgcolor" bgcolor="info" bgsize="4"/>
                     <field name="line_ids" widget="relation_sublist" options="{'field': 'name'}"
                            groups = 'finance.view_detail' string='凭证摘要'/>
@@ -128,20 +128,22 @@
             <field name="model">voucher.line</field>
             <field name="arch" type="xml">
                 <search string="Search Voucher Line">
+                    <field name='period_id'/>
                     <field name='voucher_id'/>
-                    <field name='date'/>
                     <field name='name' filter_domain="[('name','ilike',self)]"/>
                     <field name='account_id'/>
                     <field name='partner_id'/>
                     <field name='goods_id'/>
                     <field name='auxiliary_id'/>
+                    <field name='date'/>
                     <separator/>
                     <filter string="本期"
                             domain="[('voucher_id.date','&gt;=',(context_today()).strftime('%%Y-%%m-01')),
                             ('voucher_id.date','&lt;=',(context_today()).strftime('%%Y-%%m-%%d'))]"/>
+                    <filter string="隐藏作废"
+                            domain="[('state','!=','cancel')]"/>
                     <group expand="0" string="分组">
-                        <filter string="会计凭证" domain="[]" context="{'group_by':'voucher_id'}"/>
-                        <filter string="会计区间" domain="[]" context="{'group_by':'period_id'}"/>
+                        <filter string="会计期间" domain="[]" context="{'group_by':'period_id'}"/>
                         <filter string="会计科目" domain="[]" context="{'group_by':'account_id'}"/>
                     </group>
                 </search>
@@ -151,12 +153,12 @@
             <field name="name">voucher.line.tree</field>
             <field name="model">voucher.line</field>
             <field name="arch" type="xml">
-                <tree string='分录查询'  create="false" edit='false'>
+                <tree string='分录查询' colors='blue:state == "draft";lightgray:state == "cancel"' create="false" edit='false'>
+                    <field name='date'/>
+                    <field name='period_id'/>
                     <field name='voucher_id'/>
                     <button name="view_document" type="object" string="查看凭证"
                             icon="fa-search" class="oe_highlight"/>
-                    <field name='period_id'/>
-                    <field name='date'/>
                     <field name='name'/>
                     <field name='account_id'/>
                     <field name='debit' sum='借方合计' widget="bgcolor" color="success"/>

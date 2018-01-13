@@ -6,12 +6,14 @@ from odoo import models, fields, api
 from odoo.exceptions import UserError
 from odoo.tools import float_compare
 
-env = Environment(loader=PackageLoader('odoo.addons.warehouse', 'html'), autoescape=True)
+env = Environment(loader=PackageLoader(
+    'odoo.addons.warehouse', 'html'), autoescape=True)
 
 
-class wh_move_line(models.Model):
+class WhMoveLine(models.Model):
     _name = 'wh.move.line'
     _description = u'移库单明细'
+    _order = 'lot'
 
     _rec_name = 'note'
 
@@ -51,15 +53,10 @@ class wh_move_line(models.Model):
             raise UserError(u'税率不能输入超过100的数')
         if self.tax_rate < 0:
             raise UserError(u'税率不能输入负数')
-        self.price = self.price_taxed / (1 + self.tax_rate * 0.01) # 不含税单价
-        self.subtotal = self.price_taxed * self.goods_qty - self.discount_amount # 价税合计
-        self.tax_amount = self.subtotal / (100 + self.tax_rate) * self.tax_rate # 税额
-        self.amount = self.subtotal - self.tax_amount # 金额
-
-    @api.one
-    def _inverse_price(self):
-        '''由不含税价反算含税价，保存时生效'''
-        self.price_taxed = self.price * (1 + self.tax_rate * 0.01)
+        self.subtotal = self.price_taxed * self.goods_qty - self.discount_amount  # 价税合计
+        self.tax_amount = self.subtotal / \
+            (100 + self.tax_rate) * self.tax_rate  # 税额
+        self.amount = self.subtotal - self.tax_amount  # 金额
 
     @api.onchange('price', 'tax_rate')
     def onchange_price(self):
@@ -73,20 +70,22 @@ class wh_move_line(models.Model):
     @api.depends('goods_id')
     def _compute_using_attribute(self):
         self.using_attribute = self.goods_id.attribute_ids and True or False
-    
+
     @api.one
     @api.depends('move_id.warehouse_id')
     def _get_line_warehouse(self):
         self.warehouse_id = self.move_id.warehouse_id.id
         if (self.move_id.origin == 'wh.assembly' or self.move_id.origin == 'wh.disassembly' or self.move_id.origin == 'outsource') and self.type == 'in':
-            self.warehouse_id = self.env.ref('warehouse.warehouse_production').id
+            self.warehouse_id = self.env.ref(
+                'warehouse.warehouse_production').id
 
     @api.one
     @api.depends('move_id.warehouse_dest_id')
     def _get_line_warehouse_dest(self):
         self.warehouse_dest_id = self.move_id.warehouse_dest_id.id
         if (self.move_id.origin == 'wh.assembly' or self.move_id.origin == 'wh.disassembly' or self.move_id.origin == 'outsource') and self.type == 'out':
-            self.warehouse_dest_id = self.env.ref('warehouse.warehouse_production').id
+            self.warehouse_dest_id = self.env.ref(
+                'warehouse.warehouse_production').id
 
     @api.one
     @api.depends('goods_id')
@@ -99,12 +98,20 @@ class wh_move_line(models.Model):
             self.uos_id = ''
 
     @api.one
-    @api.depends('goods_qty','goods_id')
+    @api.depends('goods_qty', 'goods_id')
     def _get_goods_uos_qty(self):
         if self.goods_id and self.goods_qty:
-            self.goods_uos_qty = self.goods_qty/self.goods_id.conversion
+            self.goods_uos_qty = self.goods_qty / self.goods_id.conversion
         else:
             self.goods_uos_qty = 0
+
+    @api.one
+    def _inverse_goods_qty(self):
+        self.goods_qty = self.goods_uos_qty * self.goods_id.conversion
+
+    @api.onchange('goods_uos_qty', 'goods_id')
+    def onchange_goods_uos_qty(self):
+        self.goods_qty = self.goods_uos_qty * self.goods_id.conversion
 
     @api.depends('goods_id', 'goods_qty')
     def compute_line_net_weight(self):
@@ -123,6 +130,7 @@ class wh_move_line(models.Model):
                             default=lambda self: self.env.context.get('type'),
                             help=u'类型：出库、入库 或者 内部调拨')
     state = fields.Selection(MOVE_LINE_STATE, u'状态', copy=False, default='draft',
+                             index=True,
                              help=u'状态标识，新建时状态为草稿;审核后状态为已审核')
     goods_id = fields.Many2one('goods', string=u'商品', required=True,
                                index=True, ondelete='restrict',
@@ -145,8 +153,9 @@ class wh_move_line(models.Model):
                            digits=dp.get_precision('Quantity'),
                            help=u'该单据行对应的商品批号的商品剩余数量')
     lot_uos_qty = fields.Float(u'批号辅助数量',
-                           digits=dp.get_precision('Quantity'),
+                               digits=dp.get_precision('Quantity'),
                                help=u'该单据行对应的商品的批号辅助数量')
+    location_id = fields.Many2one('location', string='库位')
     production_date = fields.Date(u'生产日期', default=fields.Date.context_today,
                                   help=u'商品的生产日期')
     shelf_life = fields.Integer(u'保质期(天)',
@@ -154,7 +163,7 @@ class wh_move_line(models.Model):
     valid_date = fields.Date(u'有效期至',
                              help=u'商品的有效期')
     uom_id = fields.Many2one('uom', string=u'单位', ondelete='restrict', compute=_compute_uom_uos,
-                              help=u'商品的计量单位', store=True)
+                             help=u'商品的计量单位', store=True)
     uos_id = fields.Many2one('uom', string=u'辅助单位', ondelete='restrict', compute=_compute_uom_uos,
                              readonly=True,  help=u'商品的辅助单位', store=True)
     warehouse_id = fields.Many2one('warehouse', u'调出仓库',
@@ -173,11 +182,10 @@ class wh_move_line(models.Model):
                              required=True,
                              help=u'商品的数量')
     goods_uos_qty = fields.Float(u'辅助数量', digits=dp.get_precision('Quantity'),
-                                 compute=_get_goods_uos_qty, store=True,
+                                 compute=_get_goods_uos_qty, inverse=_inverse_goods_qty, store=True,
                                  help=u'商品的辅助数量')
+
     price = fields.Float(u'单价',
-                         compute=_compute_all_amount,
-                         inverse=_inverse_price,
                          store=True,
                          digits=dp.get_precision('Price'),
                          help=u'商品的单价')
@@ -189,7 +197,7 @@ class wh_move_line(models.Model):
     discount_amount = fields.Float(u'折扣额',
                                    digits=dp.get_precision('Amount'),
                                    help=u'单据的折扣额')
-    amount = fields.Float(u'金额',compute=_compute_all_amount, store=True,
+    amount = fields.Float(u'金额', compute=_compute_all_amount, store=True,
                           digits=dp.get_precision('Amount'),
                           help=u'单据的金额,计算得来')
     tax_rate = fields.Float(u'税率(%)',
@@ -207,7 +215,8 @@ class wh_move_line(models.Model):
     cost = fields.Float(u'成本', compute='_compute_cost', inverse='_inverse_cost',
                         digits=dp.get_precision('Amount'), store=True,
                         help=u'入库/出库成本')
-    line_net_weight = fields.Float(string=u'净重小计', compute=compute_line_net_weight, store=True)
+    line_net_weight = fields.Float(
+        string=u'净重小计', compute=compute_line_net_weight, store=True)
     expiration_date = fields.Date(u'过保日',
                                   help=u'商品保质期截止日期')
     company_id = fields.Many2one(
@@ -215,11 +224,36 @@ class wh_move_line(models.Model):
         string=u'公司',
         change_default=True,
         default=lambda self: self.env['res.company']._company_default_get())
+    scrap = fields.Boolean(u'报废')
+    share_cost = fields.Float(u'采购费用',
+                              digits=dp.get_precision('Amount'),
+                              help=u'点击分摊按钮或审核时将采购费用进行分摊得出的费用')
+
+    @api.model
+    def create(self, vals):
+        new_id = super(WhMoveLine, self).create(vals)
+        # 只针对入库单行
+        if new_id.type != 'out' and not new_id.location_id:
+            # 有库存的产品
+            qty_now = self.move_id.check_goods_qty(
+                new_id.goods_id, new_id.attribute_id, new_id.warehouse_dest_id)[0]
+            if qty_now:
+                # 建议将产品上架到现有库位上
+                new_id.location_id = new_id.env['location'].search([('goods_id', '=', new_id.goods_id.id),
+                                                                    ('attribute_id', '=',
+                                                                     new_id.attribute_id and new_id.attribute_id.id or False),
+                                                                    ('warehouse_id', '=', new_id.warehouse_dest_id.id)],
+                                                                   limit=1)
+        return new_id
 
     @api.one
-    @api.depends('cost_unit', 'goods_qty')
+    @api.depends('cost_unit', 'price', 'goods_qty', 'discount_amount', 'share_cost')
     def _compute_cost(self):
-        self.cost = self.cost_unit * self.goods_qty
+        if self.env.context.get('type') == 'in' and self.goods_id:
+            if self.price:
+                self.cost = self.price * self.goods_qty - self.discount_amount + self.share_cost
+            elif self.cost_unit:
+                self.cost = self.cost_unit * self.goods_qty - self.discount_amount + self.share_cost
 
     @api.one
     def _inverse_cost(self):
@@ -238,7 +272,7 @@ class wh_move_line(models.Model):
 
     @api.model
     def default_get(self, fields):
-        res = super(wh_move_line, self).default_get(fields)
+        res = super(WhMoveLine, self).default_get(fields)
         if self.env.context.get('goods_id') and self.env.context.get('warehouse_id'):
             res.update({
                 'goods_id': self.env.context.get('goods_id'),
@@ -257,11 +291,12 @@ class wh_move_line(models.Model):
         for line in self:
             if self.env.context.get('match'):
                 res.append((line.id, '%s-%s->%s(%s, %s%s)' %
-                    (line.move_id.name, line.warehouse_id.name, line.warehouse_dest_id.name,
-                        line.goods_id.name, str(line.goods_qty), line.uom_id.name)))
+                            (line.move_id.name, line.warehouse_id.name, line.warehouse_dest_id.name,
+                             line.goods_id.name, str(line.goods_qty), line.uom_id.name)))
             else:
                 res.append((line.id, line.lot))
         return res
+
     @api.model
     def name_search(self, name='', args=None, operator='ilike', limit=100):
         ''' 批号下拉的时候显示批次和剩余数量 '''
@@ -270,15 +305,18 @@ class wh_move_line(models.Model):
         if args:
             domain = args
         if name:
-            domain.append(('lot',operator,name))
-        records = self.search(domain,limit=limit)
+            domain.append(('lot', operator, name))
+        records = self.search(domain, limit=limit)
         for line in records:
-            result.append((line.id, u'%s %s 余 %s' % (line.lot, line.warehouse_dest_id.name, line.qty_remaining)))
+            result.append((line.id, u'%s %s 余 %s' % (
+                line.lot, line.warehouse_dest_id.name, line.qty_remaining)))
         return result
 
     def check_availability(self):
         if self.warehouse_dest_id == self.warehouse_id:
-            raise UserError(u'调出仓库不可以和调入仓库一样')
+            # 如果是 商品库位转移生成的内部移库，则不用约束调入仓和调出仓是否相同；否则需要约束
+            if not (self.move_id.origin == 'wh.internal' and not self.location_id == False):
+                raise UserError(u'调出仓库不可以和调入仓库一样')
 
     def prev_action_done(self):
         pass
@@ -293,6 +331,35 @@ class wh_move_line(models.Model):
                 'date': line.move_id.date,
                 'cost_time': fields.Datetime.now(self),
             })
+            if line.type == 'in' and line.location_id:
+                line.location_id.write(
+                    {'attribute_id': line.attribute_id.id, 'goods_id': line.goods_id.id})
+
+            if line.type == 'in' and line.scrap:
+                if not self.env.user.company_id.wh_scrap_id:
+                    raise UserError(u'请在公司上输入废品库')
+                dic = {
+                    'type': 'internal',
+                    'goods_id': line.goods_id.id,
+                    'uom_id': line.uom_id.id,
+                    'attribute_id': line.attribute_id.id,
+                    'goods_qty': line.goods_qty,
+                    'warehouse_id': line.warehouse_dest_id.id,
+                    'warehouse_dest_id': self.env.user.company_id.wh_scrap_id.id
+                }
+                wh_internal = self.env['wh.internal'].search([('ref', '=', line.move_id.name)])
+                if not wh_internal:
+                    value = {
+                        'ref': line.move_id.name,
+                        'date': fields.Datetime.now(self),
+                        'warehouse_id': line.warehouse_dest_id.id,
+                        'warehouse_dest_id': self.env.user.company_id.wh_scrap_id.id,
+                        'line_out_ids': [(0, 0, dic)],
+                    }
+                    self.env['wh.internal'].create(value)
+                else:
+                    dic['move_id'] = wh_internal.move_id.id
+                    self.env['wh.move.line'].create(dic)
 
     def check_cancel(self):
         pass
@@ -321,8 +388,8 @@ class wh_move_line(models.Model):
     def compute_lot_domain(self):
         warehouse_id = self.env.context.get('default_warehouse_id')
         lot_domain = [('goods_id', '=', self.goods_id.id), ('state', '=', 'done'),
-            ('lot', '!=', False), ('qty_remaining', '>', 0),
-            ('warehouse_dest_id.type', '=', 'stock')]
+                      ('lot', '!=', False), ('qty_remaining', '>', 0),
+                      ('warehouse_dest_id.type', '=', 'stock')]
 
         if warehouse_id:
             lot_domain.append(('warehouse_dest_id', '=', warehouse_id))
@@ -404,11 +471,11 @@ class wh_move_line(models.Model):
     def onchange_goods_qty(self):
         self.compute_suggested_cost()
 
-    # @api.onchange('goods_uos_qty')
-    # def onchange_goods_uos_qty(self):
-    #     if self.goods_id:
-    #         self.goods_qty = self.goods_id.conversion_unit(self.goods_uos_qty)
-    #     self.compute_suggested_cost()
+    @api.onchange('goods_uos_qty')
+    def onchange_goods_uos_qty(self):
+        if self.goods_id:
+            self.goods_qty = self.goods_id.conversion_unit(self.goods_uos_qty)
+        self.compute_suggested_cost()
 
     @api.onchange('lot_id')
     def onchange_lot_id(self):
@@ -421,14 +488,12 @@ class wh_move_line(models.Model):
 
     @api.onchange('goods_qty', 'price_taxed', 'discount_rate')
     def onchange_discount_rate(self):
-        '''当数量、单价或优惠率发生变化时，优惠金额发生变化'''
-        price = self.price_taxed / (1 + self.tax_rate * 0.01)
-        self.discount_amount = self.goods_qty * price * self.discount_rate * 0.01
+        """当数量、单价或优惠率发生变化时，优惠金额发生变化"""
+        self.price = self.price_taxed / (1 + self.tax_rate * 0.01)
+        self.discount_amount = self.goods_qty * self.price * self.discount_rate * 0.01
 
     @api.multi
-    def unlink(self):
-        for line in self:
-            if line.state == 'done':
-                raise UserError(u'不可以删除已经完成的明细')
-
-        return super(wh_move_line, self).unlink()
+    @api.onchange('discount_amount')
+    def onchange_discount_amount(self):
+        """当优惠金额发生变化时，重新取默认的单位成本，以便计算实际的单位成本"""
+        self.compute_suggested_cost()
