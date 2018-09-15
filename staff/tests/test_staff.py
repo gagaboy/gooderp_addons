@@ -17,6 +17,8 @@ class TestStaff(TransactionCase):
             'work_phone': 12345678901,
             'work_email': 'lucy@osbzr.com',
             'name': 'Lucy',
+            'code': 'lucy',
+            'type': 'member',
             'user_id': user_lucy.id,
             'job_id': self.env.ref('staff.staff_job_1').id})
         staff_pro.onchange_job_id()
@@ -62,6 +64,15 @@ class TestStaff(TransactionCase):
         lili_contract.basic_wage = 13000
         lili_contract.onchange_basic_wage()
 
+    def test_check_work_email(self):
+        ''' Test: check work email  '''
+        staff_lili = self.env.ref('staff.lili')
+        # 测试邮箱格式正确
+        staff_lili.work_email = 'gooderp@osbzr.com'
+        # 测试邮箱格式不正确，报错
+        with self.assertRaises(ValidationError):
+            staff_lili.work_email = 'gooderp'
+
 
 class TestStaffDepartment(TransactionCase):
     ''' 测试 部门 '''
@@ -71,6 +82,8 @@ class TestStaffDepartment(TransactionCase):
         department_1 = self.env.ref('staff.department_1')
         department_2 = self.env['staff.department'].create({
             'name': '财务部',
+            'code': 'dep_finance',
+            'type': 'department',
             'parent_id': department_1.id,
         })
         with self.assertRaises(ValidationError):

@@ -25,7 +25,8 @@ class WhMoveLine(models.Model):
 
     MOVE_LINE_STATE = [
         ('draft', u'草稿'),
-        ('done', u'已审核'),
+        ('done', u'已完成'),
+        ('cancel', u'已作废'),
     ]
 
     ORIGIN_EXPLAIN = {
@@ -93,9 +94,6 @@ class WhMoveLine(models.Model):
         if self.goods_id:
             self.uom_id = self.goods_id.uom_id
             self.uos_id = self.goods_id.uos_id
-        else:
-            self.uom_id = ''
-            self.uos_id = ''
 
     @api.one
     @api.depends('goods_qty', 'goods_id')
@@ -109,10 +107,6 @@ class WhMoveLine(models.Model):
     def _inverse_goods_qty(self):
         self.goods_qty = self.goods_uos_qty * self.goods_id.conversion
 
-    @api.onchange('goods_uos_qty', 'goods_id')
-    def onchange_goods_uos_qty(self):
-        self.goods_qty = self.goods_uos_qty * self.goods_id.conversion
-
     @api.depends('goods_id', 'goods_qty')
     def compute_line_net_weight(self):
         for move_line in self:
@@ -122,8 +116,8 @@ class WhMoveLine(models.Model):
                               help=u'出库/入库/移库单行对应的移库单')
     date = fields.Date(u'完成日期', copy=False,
                        help=u'单据完成日期')
-    cost_time = fields.Datetime(u'审核时间', copy=False,
-                                help=u'单据审核时间')
+    cost_time = fields.Datetime(u'确认时间', copy=False,
+                                help=u'单据确认时间')
     type = fields.Selection(MOVE_LINE_TYPE,
                             u'类型',
                             required=True,
@@ -131,7 +125,7 @@ class WhMoveLine(models.Model):
                             help=u'类型：出库、入库 或者 内部调拨')
     state = fields.Selection(MOVE_LINE_STATE, u'状态', copy=False, default='draft',
                              index=True,
-                             help=u'状态标识，新建时状态为草稿;审核后状态为已审核')
+                             help=u'状态标识，新建时状态为草稿;确认后状态为已完成')
     goods_id = fields.Many2one('goods', string=u'商品', required=True,
                                index=True, ondelete='restrict',
                                help=u'该单据行对应的商品')
@@ -155,7 +149,7 @@ class WhMoveLine(models.Model):
     lot_uos_qty = fields.Float(u'批号辅助数量',
                                digits=dp.get_precision('Quantity'),
                                help=u'该单据行对应的商品的批号辅助数量')
-    location_id = fields.Many2one('location', string='库位')
+    location_id = fields.Many2one('location', ondelete='restrict', string='库位')
     production_date = fields.Date(u'生产日期', default=fields.Date.context_today,
                                   help=u'商品的生产日期')
     shelf_life = fields.Integer(u'保质期(天)',
@@ -227,7 +221,7 @@ class WhMoveLine(models.Model):
     scrap = fields.Boolean(u'报废')
     share_cost = fields.Float(u'采购费用',
                               digits=dp.get_precision('Amount'),
-                              help=u'点击分摊按钮或审核时将采购费用进行分摊得出的费用')
+                              help=u'点击分摊按钮或确认时将采购费用进行分摊得出的费用')
 
     @api.model
     def create(self, vals):
@@ -317,6 +311,14 @@ class WhMoveLine(models.Model):
             # 如果是 商品库位转移生成的内部移库，则不用约束调入仓和调出仓是否相同；否则需要约束
             if not (self.move_id.origin == 'wh.internal' and not self.location_id == False):
                 raise UserError(u'调出仓库不可以和调入仓库一样')
+        # 检查属性或批号是否填充，防止无权限人员不填就可以保存
+        if self.using_attribute and not self.attribute_id:
+            raise UserError(u'请输入商品：%s 的属性' % self.goods_id.name)
+        if self.using_batch:
+            if self.type == 'in' and not self.lot:
+                raise UserError(u'请输入商品：%s 的批号' % self.goods_id.name)
+            if self.type in ['out', 'internal'] and not self.lot_id:
+                raise UserError(u'请选择商品：%s 的批号' % self.goods_id.name)
 
     def prev_action_done(self):
         pass
@@ -331,9 +333,13 @@ class WhMoveLine(models.Model):
                 'date': line.move_id.date,
                 'cost_time': fields.Datetime.now(self),
             })
-            if line.type == 'in' and line.location_id:
-                line.location_id.write(
-                    {'attribute_id': line.attribute_id.id, 'goods_id': line.goods_id.id})
+            if line.type in ('in', 'internal'):
+                locations = self.env['location'].search([('warehouse_id', '=', line.warehouse_dest_id.id)])
+                if locations and not line.location_id:
+                    raise UserError(u'调入仓库 %s 进行了库位管理，请在明细行输入库位' % line.warehouse_dest_id.name)
+                if line.location_id:
+                    line.location_id.write(
+                        {'attribute_id': line.attribute_id.id, 'goods_id': line.goods_id.id})
 
             if line.type == 'in' and line.scrap:
                 if not self.env.user.company_id.wh_scrap_id:
@@ -347,6 +353,8 @@ class WhMoveLine(models.Model):
                     'warehouse_id': line.warehouse_dest_id.id,
                     'warehouse_dest_id': self.env.user.company_id.wh_scrap_id.id
                 }
+                if line.lot:
+                    dic.update({'lot_id': line.id})
                 wh_internal = self.env['wh.internal'].search([('ref', '=', line.move_id.name)])
                 if not wh_internal:
                     value = {
@@ -364,14 +372,14 @@ class WhMoveLine(models.Model):
     def check_cancel(self):
         pass
 
-    def prev_action_cancel(self):
+    def prev_action_draft(self):
         pass
 
     @api.multi
-    def action_cancel(self):
+    def action_draft(self):
         for line in self:
             line.check_cancel()
-            line.prev_action_cancel()
+            line.prev_action_draft()
             line.write({
                 'state': 'draft',
                 'date': False,
@@ -422,20 +430,10 @@ class WhMoveLine(models.Model):
 
             partner_id = self.env.context.get('default_partner')
             partner = self.env['partner'].browse(partner_id)
-            if self.goods_id.tax_rate and partner.tax_rate:
-                if self.goods_id.tax_rate >= partner.tax_rate:
-                    self.tax_rate = partner.tax_rate
-                else:
-                    self.tax_rate = self.goods_id.tax_rate
-            elif self.goods_id.tax_rate and not partner.tax_rate:
-                self.tax_rate = self.goods_id.tax_rate
-            elif not self.goods_id.tax_rate and partner.tax_rate:
-                self.tax_rate = partner.tax_rate
-            else:
-                if self.type == 'in':
-                    self.tax_rate = self.env.user.company_id.import_tax_rate
-                if self.type == 'out':
-                    self.tax_rate = self.env.user.company_id.output_tax_rate
+            if self.type == 'in':
+                self.tax_rate = self.goods_id.get_tax_rate(self.goods_id, partner, 'buy')
+            if self.type == 'out':
+                self.tax_rate = self.goods_id.get_tax_rate(self.goods_id, partner, 'sell')
 
             if self.goods_id.using_batch and self.goods_id.force_batch_one:
                 self.goods_qty = 1
@@ -497,3 +495,10 @@ class WhMoveLine(models.Model):
     def onchange_discount_amount(self):
         """当优惠金额发生变化时，重新取默认的单位成本，以便计算实际的单位成本"""
         self.compute_suggested_cost()
+
+    @api.one
+    @api.constrains('goods_qty')
+    def check_goods_qty(self):
+        """序列号管理的商品数量必须为1"""
+        if self.force_batch_one and self.goods_qty > 1:
+            raise UserError(u'商品 %s 进行了序列号管理，数量必须为1' % self.goods_id.name)

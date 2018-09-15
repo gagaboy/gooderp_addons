@@ -47,7 +47,8 @@ class CreateExchangeWizard(models.TransientModel):
         '''
         account_id = vals.get('account_id')
         voucher_lines = self.env['voucher.line'].search(
-            [('account_id', '=', account_id)])
+            [('account_id', '=', account_id),
+             ('state', '=', 'done')])
         account = vals.get('account')
         res = {}
         for line in voucher_lines:
@@ -108,7 +109,8 @@ class CreateExchangeWizard(models.TransientModel):
         '''
         account_id = vals.get('account_id')
         voucher_lines = self.env['voucher.line'].search(
-            [('account_id', '=', account_id)])
+            [('account_id', '=', account_id),
+             ('state', '=', 'done')])
         account = vals.get('account')
         currency_amount = 0
         debit = 0

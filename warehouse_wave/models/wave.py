@@ -6,6 +6,8 @@ from odoo.exceptions import UserError
 class Wave(models.Model):
     _name = "wave"
     _description = u"拣货单"
+    _order = 'create_date desc'
+
     state = fields.Selection([('draft', '未打印'), ('printed', '已打印'),
                               ('done', '已完成')], string='状态', default='draft',
                              index=True,
@@ -66,14 +68,14 @@ class Wave(models.Model):
     @api.multi
     def unlink(self):
         """
-        1.有部分已经打包,捡货单不能进行删除
+        1.有部分已经打包,拣货单不能进行删除
         2.能删除了,要把一些相关联的字段清空 如pakge_sequence
         """
         for wave_row in self:
             wh_move_rows = self.env['wh.move'].search([('wave_id', '=', wave_row.id),
-                                                       ('pakge_sequence', '=', False)])
+                                                       ('state', '=', 'done')])
             if wh_move_rows:
-                raise UserError(u"""发货单%s已经打包发货,捡货单%s不允许删除!
+                raise UserError(u"""发货单%s已经打包发货,拣货单%s不允许删除!
                                  """ % (u'-'.join([move_row.name for move_row in wh_move_rows]),
                                         wave_row.name))
             # 清空发货单上的格子号
@@ -89,6 +91,19 @@ class WhMove(models.Model):
 
     wave_id = fields.Many2one('wave', string=u'拣货单')
     pakge_sequence = fields.Char(u'格子号')
+
+    @api.multi
+    def unlink(self):
+        """
+        删除发货单时，删除对应的拣货单行
+        """
+        for move in self:
+            for wave_line in move.wave_id.line_ids:
+                for move_line in wave_line.move_line_ids:
+                    if move_line.move_id.id == move.id:
+                        move_line.unlink()
+
+        return super(WhMove, self).unlink()
 
 
 class WaveLine(models.Model):
@@ -158,7 +173,7 @@ class CreateWave(models.TransientModel):
 
     def build_wave_line_data(self, product_location_num_dict):
         """
-        构造捡货单行的 数据
+        构造拣货单行的 数据
         """
         return_line_data = []
         sequence = 1
@@ -175,6 +190,30 @@ class CreateWave(models.TransientModel):
             })
             sequence += 1
         return return_line_data
+
+    @api.multi
+    def create_wave_reserved(self, wave_row, line):
+        reserved_dict = {
+            'wave_id': wave_row.id,
+            'goods_id': line.goods_id.id,
+            'attribute_id': line.attribute_id.id,
+            'warehouse_id': line.warehouse_id.id,
+            'goods_qty': line.goods_qty,
+            'move_id': line.move_id.id,
+            'move_name': line.move_id.name,
+        }
+        return reserved_dict
+
+    @api.multi
+    def get_sell_delivery(self, goods_id, attribute_id):
+        ''' 查找缺货发货单 '''
+        sell_delivery_lists = []
+        for active_model in self.env[self.active_model].browse(self.env.context.get('active_ids')):
+            for line in active_model.line_out_ids:
+                if line.goods_id.id == goods_id and line.attribute_id.id == attribute_id:
+                    sell_delivery_lists.append(line.move_id.name)
+
+        return sell_delivery_lists
 
     @api.multi
     def create_wave(self):
@@ -197,13 +236,29 @@ class CreateWave(models.TransientModel):
 
                 if line.goods_id.no_stock:
                     continue
-                available_line.append(True)
-                # 缺货发货单不分配进拣货单
+
+                # 生成未发货的 wave.line 对应的记录到 wave.reserved
+                reserved_dict = self.create_wave_reserved(wave_row, line)
+                self.env['wave.reserved'].create(reserved_dict)
+                reserved_waves = self.env['wave.reserved'].search([('goods_id', '=', line.goods_id.id),
+                                                                   ('attribute_id', '=', line.attribute_id.id),
+                                                                   ('warehouse_id', '=', line.warehouse_id.id)])
+                total_goods_qty = sum(line_rec.goods_qty for line_rec in reserved_waves)
+
                 result = line.move_id.check_goods_qty(
                     line.goods_id, line.attribute_id, line.warehouse_id)
                 result = result[0] or 0
-                if line.goods_qty > result:
+                if total_goods_qty > result:
+                    # 缺货发货单不分配进拣货单
                     available_line.append(False)
+                    # 查找所有勾选的 含有该产品的 发货单
+                    deliverys_lists = self.get_sell_delivery(line.goods_id.id, line.attribute_id.id)
+
+                    raise UserError(u'您勾选的订单与未发货的拣货单商品数量总和大于库存，不能生成拣货单。\n'
+                                    u'产品 %s 库存不足。\n'
+                                    u'相关拣货单 %s' % (line.goods_id.name, deliverys_lists))
+                else:
+                    available_line.append(True)
 
             if all(available_line):
                 for line in active_model.line_out_ids:
@@ -218,9 +273,8 @@ class CreateWave(models.TransientModel):
                 active_model.pakge_sequence = index
                 active_model.wave_id = wave_row.id
                 express_type = active_model.express_type
-        # 所有订单缺货
-        if not product_location_num_dict:
-            raise UserError(u'您勾选的订单缺货，不能生成拣货单')
+
+        # 所有订单都不缺货
         wave_row.express_type = express_type
         wave_row.line_ids = self.build_wave_line_data(
             product_location_num_dict)
@@ -232,8 +286,8 @@ class CreateWave(models.TransientModel):
             available_locs = self.env['location'].search([('goods_id', '=', WaveLine.goods_id.id),
                                                           ('attribute_id', '=',
                                                            WaveLine.attribute_id.id),
-                                                          ('warehouse_id', '=', warehouse_id)])
-
+                                                          ('warehouse_id', '=', warehouse_id),
+                                                          ('save_qty', '!=', 0)])
             remaining_picking_qty = WaveLine.picking_qty
             for loc in available_locs:
                 if remaining_picking_qty < 0:
@@ -288,6 +342,10 @@ class DoPack(models.Model):
                 self.is_pack = False
 
         if self.is_pack:
+            # 打包完成，清空 wave.reserved 表上的记录
+            reserved_waves = self.env['wave.reserved'].search([('move_name', '=', self.odd_numbers)])
+            reserved_waves.unlink()
+
             ORIGIN_EXPLAIN = {
                 'wh.internal': 'wh.internal',
                 'wh.out.others': 'wh.out',
@@ -298,7 +356,7 @@ class DoPack(models.Model):
                              'wh.out': 'approve_order'}
             move_row = self.env['wh.move'].search(
                 [('name', '=', self.odd_numbers)])
-            move_row.write({'pakge_sequence': False})
+            # move_row.write({'pakge_sequence': False}) # 打包完成 格子号 写成 False? 暂时注释掉
             model_row = self.env[ORIGIN_EXPLAIN.get(move_row.origin)
                                  ].search([('sell_move_id', '=', move_row.id)])
             func = getattr(model_row, function_dict.get(model_row._name), None)
@@ -320,8 +378,6 @@ class DoPack(models.Model):
                         dialog.do_confirm()
                     # 执行完 sell_delivery_done 方法，给 打包完成 字段赋 True 值
                     self.is_pack = True
-                else:
-                    return func()
 
     def get_line_data(self, code):
         """构造行的数据"""
@@ -429,3 +485,35 @@ class delivery_express_package_print(models.TransientModel):
                     'context': {'move_ids': [move.id for move in move_rows]},
                     'target': 'current',
                     }
+
+
+class WaveReserved(models.Model):
+    _name = 'wave.reserved'
+    _description = u'wave预留'
+
+    wave_id = fields.Many2one('wave',
+                              ondelete='cascade',
+                              string=u'拣货单',
+                              help=u'每条记录对应的拣货单ID，在创建记录完成时填入。'
+                                   u'当删除wave时，级联删除预留记录。')
+    goods_id = fields.Many2one('goods',
+                               ondelete='restrict',
+                               string=u'商品',
+                               help=u'每条记录对应的商品ID，在创建记录时填入。')
+    attribute_id = fields.Many2one('attribute',
+                                   string=u'属性',
+                                   ondelete='restrict',
+                                   domain="[('goods_id', '=', goods_id)]",
+                                   help=u'商品的属性。')
+    warehouse_id = fields.Many2one('warehouse',
+                                   string=u'仓库',
+                                   ondelete='restrict',
+                                   help=u'生成该记录的单据对应的仓库ID，在创建记录时填入。')
+    goods_qty = fields.Float(u'数量')
+    move_id = fields.Many2one('wh.move',
+                              string=u'发货单',
+                              ondelete='cascade',
+                              help=u'每条记录对应的move ID，在创建记录时填入。'
+                                   u'当删除move时，级联删除预留记录。')
+    move_name = fields.Char(u'发货单号',
+                            help=u'每条记录对应的发货单号，在创建记录时填入。方便在打包完成时清空记录。')

@@ -5,10 +5,10 @@ import odoo.addons.decimal_precision as dp
 from odoo.exceptions import UserError
 from odoo.tools import float_compare
 
-# 订单审核状态可选值
+# 订单确认状态可选值
 SELL_ORDER_STATES = [
-    ('draft', u'未审核'),
-    ('done', u'已审核'),
+    ('draft', u'草稿'),
+    ('done', u'已确认'),
     ('cancel', u'已作废')]
 
 # 字段只读状态
@@ -27,7 +27,7 @@ class SellAdjust(models.Model):
                        help=u'变更单编号，保存时可自动生成')
     order_id = fields.Many2one('sell.order', u'原始单据', states=READONLY_STATES,
                                copy=False, ondelete='restrict',
-                               help=u'要调整的原始销货订单，只能调整已审核且没有全部出库的销货订单')
+                               help=u'要调整的原始销货订单，只能调整已确认且没有全部出库的销货订单')
     date = fields.Date(u'单据日期', states=READONLY_STATES,
                        default=lambda self: fields.Date.context_today(self),
                        index=True, copy=False,
@@ -35,13 +35,13 @@ class SellAdjust(models.Model):
     line_ids = fields.One2many('sell.adjust.line', 'order_id', u'变更单行',
                                states=READONLY_STATES, copy=True,
                                help=u'变更单明细行，不允许为空')
-    approve_uid = fields.Many2one('res.users', u'审核人',
+    approve_uid = fields.Many2one('res.users', u'确认人',
                                   copy=False, ondelete='restrict',
-                                  help=u'审核变更单的人')
-    state = fields.Selection(SELL_ORDER_STATES, u'审核状态',
+                                  help=u'确认变更单的人')
+    state = fields.Selection(SELL_ORDER_STATES, u'确认状态',
                              index=True, copy=False,
                              default='draft',
-                             help=u'变更单审核状态')
+                             help=u'变更单确认状态')
     note = fields.Text(u'备注',
                        help=u'单据备注')
     user_id = fields.Many2one(
@@ -60,14 +60,14 @@ class SellAdjust(models.Model):
 
     @api.one
     def sell_adjust_done(self):
-        '''审核销售变更单：
+        '''确认销售变更单：
         当调整后数量 < 原单据中已出库数量，则报错；
         当调整后数量 > 原单据中已出库数量，则更新原单据及发货单分单的数量；
         当调整后数量 = 原单据中已出库数量，则更新原单据数量，删除发货单分单；
         当新增商品时，则更新原单据及发货单分单明细行。
         '''
         if self.state == 'done':
-            raise UserError(u'请不要重复审核！')
+            raise UserError(u'请不要重复确认！')
         if not self.line_ids:
             raise UserError(u'请输入商品明细行！')
         delivery = self.env['sell.delivery'].search(
@@ -76,6 +76,9 @@ class SellAdjust(models.Model):
         if not delivery:
             raise UserError(u'销售发货单已全部出库，不能调整')
         for line in self.line_ids:
+            # 检查属性是否填充，防止无权限人员不填就可以保存
+            if line.using_attribute and not line.attribute_id:
+                raise UserError(u'请输入商品：%s 的属性' % line.goods_id.name)
             origin_line = self.env['sell.order.line'].search(
                 [('goods_id', '=', line.goods_id.id),
                  ('attribute_id', '=', line.attribute_id.id),
@@ -104,7 +107,16 @@ class SellAdjust(models.Model):
                                         line.goods_id.name)
                 # 调整后数量与已出库数量相等时，删除产生的发货单分单
                 else:
-                    delivery.unlink()
+                    # 先删除对应的发货单行
+                    move_line = self.env['wh.move.line'].search(
+                        [('sell_line_id', '=', origin_line.id), ('state', '=',
+                                                                 'draft')])
+                    if move_line:
+                        move_line.unlink()
+
+                    # 如果发货单明细没有了，则删除发货单
+                    if len(delivery.sell_move_id.line_out_ids) == 0:
+                        delivery.unlink()
             else:
                 vals = {
                     'order_id': self.order_id.id,
@@ -228,17 +240,7 @@ class SellAdjustLine(models.Model):
             self.uom_id = self.goods_id.uom_id
             self.price_taxed = self.goods_id.price
 
-            if self.goods_id.tax_rate and self.order_id.order_id.partner_id.tax_rate:
-                if self.goods_id.tax_rate >= self.order_id.order_id.partner_id.tax_rate:
-                    self.tax_rate = self.order_id.order_id.partner_id.tax_rate
-                else:
-                    self.tax_rate = self.goods_id.tax_rate
-            elif self.goods_id.tax_rate and not self.order_id.order_id.partner_id.tax_rate:
-                self.tax_rate = self.goods_id.tax_rate
-            elif not self.goods_id.tax_rate and self.order_id.order_id.partner_id.tax_rate:
-                self.tax_rate = self.order_id.order_id.partner_id.tax_rate
-            else:
-                self.tax_rate = self.env.user.company_id.output_tax_rate
+            self.tax_rate = self.goods_id.get_tax_rate(self.goods_id, self.order_id.order_id.partner_id, 'sell')
 
     @api.onchange('quantity', 'price_taxed', 'discount_rate')
     def onchange_discount_rate(self):

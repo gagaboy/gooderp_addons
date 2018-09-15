@@ -58,14 +58,7 @@ class WhMove(models.Model):
         return shipping_type_config
 
     def get_sender(self, ware_hosue_row, pakge_sequence):
-        add_info = u'；格子号:'
-        if pakge_sequence:
-            add_info += pakge_sequence
-        else:
-            add_info += u' '
-        add_info += u'；拣货单:'
-        if self.wave_id:
-            add_info += self.wave_id.name
+        add_info = self.wave_id and ('(' + pakge_sequence + ')' + self.wave_id.name) or ''
 
         sender = dict(Company=ware_hosue_row.company_id.name,
                       Name=ware_hosue_row.principal_id.name or ware_hosue_row.company_id.name or '',
@@ -87,18 +80,32 @@ class WhMove(models.Model):
         if ORIGIN_EXPLAIN.get(self.origin):
             model_row = self.env[ORIGIN_EXPLAIN.get(self.origin)
                                  ].search([('sell_move_id', '=', self.id)])
+        detail_address = model_row.address_id.detail_address
+        if detail_address:
+            first_index = -1
+            if u'区' in detail_address:
+                first_index = detail_address.find(u'区')
+            if u'县' in detail_address:
+                first_index = detail_address.find(u'县')
+            # 处理县级市
+            if u'市' in detail_address and (u'区' not in detail_address or u'县' not in detail_address):
+                first_index = detail_address.find(u'市')
+            # 处理 内蒙 盟
+            if u'内蒙古' in detail_address and u'盟' in detail_address:
+                first_index = detail_address.find(u'盟')
+            detail_address = detail_address[first_index+1:]
         receiver = dict(Company=' ',
                         Name=model_row.partner_id.name,
                         Mobile=model_row.address_id.mobile,
-                        ProvinceName=model_row.address_id.province_id.name or u'上海',
-                        CityName=model_row.address_id.city_id.city_name or u'上海',
-                        ExpAreaName=model_row.address_id.county_id.county_name or u'浦东新区',
-                        Address=model_row.address_id.detail_address or u'金海路2588号B-213')
+                        ProvinceName=model_row.address_id.province_id.name or model_row.address_id.city_id.city_name or u'()',
+                        CityName=model_row.address_id.city_id.city_name or u' ',
+                        ExpAreaName=model_row.address_id.county_id.county_name or u' ',
+                        Address=detail_address or u' ')
 
         goods = []
         qty = 0
         for line in self.line_out_ids:
-            goods.append(dict(GoodsName=line.goods_id.name,  # 产品名称
+            goods.append(dict(GoodsName=line.goods_id.code,  # 产品编号
                               Goodsquantity=int(line.goods_qty),  # 产品数量
                               GoodsWeight=1.0,  # 产品重量
                               GoodsCode=line.goods_id.code or '',  # 产品编码
@@ -121,11 +128,14 @@ class WhMove(models.Model):
         sender = self.get_sender(self.warehouse_id, self.pakge_sequence)
         remark = self.note or '小心轻放'
         shipping_type = self.express_type or 'YTO'
+        custom_area = self.note or '小心轻放'
         receiver, commodity, qty = self.get_receiver_goods_message()
-        request_data = dict(OrderCode=order_code, PayType=1, ExpType=1, Cost=1.0, OtherCost=1.0,
+        request_data = dict(OrderCode=order_code, PayType=3, ExpType=1, Cost=1.0, OtherCost=1.0,
                             Sender=sender, Receiver=receiver, Commodity=commodity, Weight=1.0,
-                            Quantity=qty, Volume=0.0, Remark=remark, IsReturnPrintTemplate=1)
+                            Quantity=1, Volume=0.0, Remark=remark, IsReturnPrintTemplate=1)
         request_data.update(self.get_shipping_type_config(shipping_type))
+        if shipping_type == 'YTO':
+            request_data.update({'TemplateSize': 180, 'CustomArea': custom_area})
         request_data = json.dumps(request_data)
         data = {'RequestData': request_data,
                 'EBusinessID': appid,
@@ -139,7 +149,9 @@ class WhMove(models.Model):
             'Order', {})).get('LogisticCode', "")
         self.express_menu = content.get('PrintTemplate')
         if not self.express_code:
-            raise UserError("获取快递面单失败!\n原因:%s" % str(resp))
+            raise UserError("获取快递面单失败!\n原因:%s %s" % (str(resp),
+                                        str(request_data)))
+
         return self.express_menu
 
     def encrypt_kdn(self, data, appkey):
@@ -179,7 +191,7 @@ class WhMove(models.Model):
         ''' 打印快递面单+装箱单 '''
         move_rows = self.browse(move_ids)
         return_html_list = []
-        for move_row in move_rows:
+        for move_row in move_rows.sorted(key=lambda x: int(x.pakge_sequence)):
             if move_row.express_code:
                 return_html_list.append(move_row.express_menu)
             else:
@@ -195,7 +207,7 @@ class WhMove(models.Model):
         ''' 打印装箱单 '''
         move_rows = self.browse(move_ids)
         return_html_list = []
-        for move_row in move_rows:
+        for move_row in move_rows.sorted(key=lambda x: int(x.pakge_sequence)):
             return_html_list.append(self.get_package_list_data(move_row))
 
         return return_html_list

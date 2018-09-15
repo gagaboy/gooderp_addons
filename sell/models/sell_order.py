@@ -5,10 +5,10 @@ import odoo.addons.decimal_precision as dp
 from odoo.exceptions import UserError
 from odoo.tools import float_compare
 
-# 销货订单审核状态可选值
+# 销货订单确认状态可选值
 SELL_ORDER_STATES = [
-    ('draft', u'未审核'),
-    ('done', u'已审核'),
+    ('draft', u'草稿'),
+    ('done', u'已确认'),
     ('cancel', u'已作废')]
 
 # 字段只读状态
@@ -29,6 +29,12 @@ class SellOrder(models.Model):
         '''当订单行和优惠金额改变时，改变成交金额'''
         total = sum(line.subtotal for line in self.line_ids)
         self.amount = total - self.discount_amount
+
+    @api.one
+    @api.depends('line_ids.quantity')
+    def _compute_qty(self):
+        '''当订单行数量改变时，更新总数量'''
+        self.total_qty = sum(line.quantity for line in self.line_ids)
 
     @api.one
     @api.depends('line_ids.quantity', 'line_ids.quantity_out')
@@ -71,7 +77,24 @@ class SellOrder(models.Model):
     @api.depends('delivery_ids')
     def _compute_delivery(self):
         for order in self:
-            order.delivery_count = len(order.delivery_ids)
+            order.delivery_count = len([deli for deli in order.delivery_ids if not deli.is_return])
+            order.return_count = len([deli for deli in order.delivery_ids if deli.is_return])
+    
+    @api.one
+    @api.depends('partner_id','partner_id.responsible_id')
+    def _get_sell_user(self):
+        '''计算销售单据的业务员，不允许修改'''
+        if self.partner_id:
+            if self.partner_id.responsible_id:
+                self.user_id = self.partner_id.responsible_id
+            else:
+                self.user_id = self._uid
+
+    @api.one
+    @api.depends('line_ids.goods_id', 'line_ids.quantity')
+    def _compute_net_weight(self):
+        '''计算净重合计'''
+        self.net_weight = sum(line.goods_id.net_weight * line.quantity for line in self.line_ids)
 
     partner_id = fields.Many2one('partner', u'客户',
                                  ondelete='restrict', states=READONLY_STATES,
@@ -79,15 +102,16 @@ class SellOrder(models.Model):
     contact = fields.Char(u'联系人', states=READONLY_STATES,
                           help=u'客户方的联系人')
     address_id = fields.Many2one('partner.address', u'地址', states=READONLY_STATES,
+                                 domain="[('partner_id', '=', partner_id)]",
                                  help=u'联系地址')
     mobile = fields.Char(u'手机', states=READONLY_STATES,
                          help=u'联系手机')
     user_id = fields.Many2one(
         'res.users',
         u'销售员',
-        ondelete='restrict',
+        ondelete='restrict',store=True,
         states=READONLY_STATES,
-        default=lambda self: self.env.user,
+        computer='_get_sell_user',
         help=u'单据经办人',
     )
     date = fields.Date(u'单据日期',
@@ -132,17 +156,22 @@ class SellOrder(models.Model):
                           compute='_compute_amount', track_visibility='always',
                           digits=dp.get_precision('Amount'),
                           help=u'总金额减去优惠金额')
+    total_qty = fields.Float(string=u'数量合计', store=True, readonly=True,
+                          compute='_compute_qty',
+                          track_visibility='always',
+                          digits=dp.get_precision('Quantity'),
+                          help=u'数量总计')
     pre_receipt = fields.Float(u'预收款', states=READONLY_STATES,
                                digits=dp.get_precision('Amount'),
-                               help=u'输入预收款审核销货订单，会产生一张收款单')
+                               help=u'输入预收款确认销货订单，会产生一张收款单')
     bank_account_id = fields.Many2one('bank.account', u'结算账户',
                                       ondelete='restrict',
                                       help=u'用来核算和监督企业与其他单位或个人之间的债权债务的结算情况')
-    approve_uid = fields.Many2one('res.users', u'审核人', copy=False,
+    approve_uid = fields.Many2one('res.users', u'确认人', copy=False,
                                   ondelete='restrict',
-                                  help=u'审核单据的人')
-    state = fields.Selection(SELL_ORDER_STATES, u'审核状态', readonly=True,
-                             help=u"销货订单的审核状态", index=True,
+                                  help=u'确认单据的人')
+    state = fields.Selection(SELL_ORDER_STATES, u'确认状态', readonly=True,
+                             help=u"销货订单的确认状态", index=True,
                              copy=False, default='draft')
     goods_state = fields.Char(u'发货状态', compute=_get_sell_goods_state,
                               default=u'未出库',
@@ -164,14 +193,25 @@ class SellOrder(models.Model):
     received_amount = fields.Float(
         u'已收金额',  compute=_get_received_amount, readonly=True)
     delivery_ids = fields.One2many(
-        'sell.delivery', 'order_id', string='Deliverys', copy=False)
+        'sell.delivery', 'order_id', string=u'发货单', copy=False)
     delivery_count = fields.Integer(
-        compute='_compute_delivery', string='Deliverys Count', default=0)
+        compute='_compute_delivery', string=u'发货单数量', default=0)
+    return_count = fields.Integer(
+        compute='_compute_delivery', string=u'退货单数量', default=0)
     pay_method = fields.Many2one('core.value',
                                  string=u'付款方式',
                                  ondelete='restrict',
                                  domain=[('type', '=', 'pay_method')],
                                  context={'type': 'pay_method'})
+    express_type = fields.Char(u'承运商')
+    money_order_id = fields.Many2one(
+        'money.order',
+        u'预收款单',
+        readonly=True,
+        copy=False,
+        help=u'输入预收款确认时产生的预收款单')
+    net_weight = fields.Float(
+        string=u'净重合计', compute='_compute_net_weight', store=True)
 
     @api.onchange('address_id')
     def onchange_partner_address(self):
@@ -196,17 +236,7 @@ class SellOrder(models.Model):
                 self.address_id = partners_add[0].id
 
             for line in self.line_ids:
-                if line.goods_id.tax_rate and self.partner_id.tax_rate:
-                    if line.goods_id.tax_rate >= self.partner_id.tax_rate:
-                        line.tax_rate = self.partner_id.tax_rate
-                    else:
-                        line.tax_rate = line.goods_id.tax_rate
-                elif line.goods_id.tax_rate and not self.partner_id.tax_rate:
-                    line.tax_rate = line.goods_id.tax_rate
-                elif not line.goods_id.tax_rate and self.partner_id.tax_rate:
-                    line.tax_rate = self.partner_id.tax_rate
-                else:
-                    line.tax_rate = self.env.user.company_id.output_tax_rate
+                line.tax_rate = line.goods_id.get_tax_rate(line.goods_id, self.partner_id, 'sell')
 
             address_list = [
                 child_list.id for child_list in self.partner_id.child_ids]
@@ -243,7 +273,6 @@ class SellOrder(models.Model):
             'sell_id': self.id,
         }
 
-    @api.one
     def generate_receipt_order(self):
         '''由销货订单生成收款单'''
         # 发库单/退货单
@@ -252,15 +281,19 @@ class SellOrder(models.Model):
                 self._get_vals()
             )
             money_order.money_order_done()
+            return money_order
 
     @api.one
     def sell_order_done(self):
-        '''审核销货订单'''
+        '''确认销货订单'''
         if self.state == 'done':
-            raise UserError(u'请不要重复审核！')
+            raise UserError(u'请不要重复确认！')
         if not self.line_ids:
             raise UserError(u'请输入商品明细行！')
         for line in self.line_ids:
+            # 检查属性是否填充，防止无权限人员不填就可以保存
+            if line.using_attribute and not line.attribute_id:
+                raise UserError(u'请输入商品：%s 的属性' % line.goods_id.name)
             if line.quantity <= 0 or line.price_taxed < 0:
                 raise UserError(u'商品 %s 的数量和含税单价不能小于0！' % line.goods_id.name)
             if line.tax_amount > 0 and self.currency_id:
@@ -268,30 +301,32 @@ class SellOrder(models.Model):
         if not self.bank_account_id and self.pre_receipt:
             raise UserError(u'预付款不为空时，请选择结算账户！')
         # 销售预收款生成收款单
-        self.generate_receipt_order()
+        money_order = self.generate_receipt_order()
         self.sell_generate_delivery()
-        self.state = 'done'
+
         self.approve_uid = self._uid
+        self.write({
+            'money_order_id': money_order and money_order.id,
+            'state': 'done',  # 为保证审批流程顺畅，否则，未审批就可审核
+        })
 
     @api.one
     def sell_order_draft(self):
-        '''反审核销货订单'''
+        '''撤销确认销货订单'''
         if self.state == 'draft':
-            raise UserError(u'请不要重复反审核！')
+            raise UserError(u'请不要重复撤销确认！')
         if self.goods_state != u'未出库':
-            raise UserError(u'该销货订单已经发货，不能反审核！')
+            raise UserError(u'该销货订单已经发货，不能撤销确认！')
         # 查找产生的发货单并删除
         delivery = self.env['sell.delivery'].search(
             [('order_id', '=', self.name)])
         delivery.unlink()
         # 查找产生的收款单并删除
-        money_order = self.env['money.order'].search(
-            [('origin_name', '=', self.name)])
-        if money_order:
-            money_order.money_order_draft()
-            money_order.unlink()
-        self.state = 'draft'
+        if self.money_order_id:
+            self.money_order_id.money_order_draft()
+            self.money_order_id.unlink()
         self.approve_uid = ''
+        self.state = 'draft'
 
     @api.one
     def get_delivery_line(self, line, single=False):
@@ -350,6 +385,7 @@ class SellOrder(models.Model):
             'contact': self.contact,
             'address_id': self.address_id.id,
             'mobile': self.mobile,
+            'express_type': self.express_type,
         })
         if self.type == 'sell':
             delivery_id.write({'line_out_ids': [
@@ -404,11 +440,9 @@ class SellOrder(models.Model):
         This function returns an action that display existing deliverys of given sells order ids.
         When only one found, show the delivery immediately.
         '''
-
         self.ensure_one()
-        name = (self.type == 'sell' and u'销售发库单' or u'销售退货单')
         action = {
-            'name': name,
+            'name': u'销售发货单',
             'type': 'ir.actions.act_window',
             'view_type': 'form',
             'view_mode': 'form',
@@ -416,17 +450,42 @@ class SellOrder(models.Model):
             'view_id': False,
             'target': 'current',
         }
-
-        delivery_ids = self.delivery_ids.ids
+        delivery_ids = [delivery.id for delivery in self.delivery_ids if not delivery.is_return]
         if len(delivery_ids) > 1:
             action['domain'] = "[('id','in',[" + \
                 ','.join(map(str, delivery_ids)) + "])]"
             action['view_mode'] = 'tree,form'
         elif len(delivery_ids) == 1:
-            view_id = (self.type == 'sell'
-                       and self.env.ref('sell.sell_delivery_form').id
-                       or self.env.ref('sell.sell_return_form').id)
+            view_id = self.env.ref('sell.sell_delivery_form').id
             action['views'] = [(view_id, 'form')]
+            action['res_id'] = delivery_ids and delivery_ids[0] or False
+        return action
+
+    @api.multi
+    def action_view_return(self):
+        '''
+        该销货订单对应的退货单
+        '''
+        self.ensure_one()
+        action = {
+            'name': u'销售退货单',
+            'type': 'ir.actions.act_window',
+            'view_type': 'form',
+            'view_mode': 'form',
+            'res_model': 'sell.delivery',
+            'view_id': False,
+            'target': 'current',
+        }
+        tree_view_id = self.env.ref('sell.sell_return_tree').id
+        form_view_id = self.env.ref('sell.sell_return_form').id
+        delivery_ids = [delivery.id for delivery in self.delivery_ids if delivery.is_return]
+        if len(delivery_ids) > 1:
+            action['domain'] = "[('id','in',[" + \
+                               ','.join(map(str, delivery_ids)) + "])]"
+            action['view_mode'] = 'tree,form'
+            action['views'] = [(tree_view_id, 'tree'), (form_view_id, 'form')]
+        elif len(delivery_ids) == 1:
+            action['views'] = [(form_view_id, 'form')]
             action['res_id'] = delivery_ids and delivery_ids[0] or False
         return action
 
@@ -563,17 +622,7 @@ class SellOrderLine(models.Model):
         if self.goods_id:
             self.uom_id = self.goods_id.uom_id
             self.price_taxed = self.goods_id.price
-            if self.goods_id.tax_rate and self.order_id.partner_id.tax_rate:
-                if self.goods_id.tax_rate >= self.order_id.partner_id.tax_rate:
-                    self.tax_rate = self.order_id.partner_id.tax_rate
-                else:
-                    self.tax_rate = self.goods_id.tax_rate
-            elif self.goods_id.tax_rate and not self.order_id.partner_id.tax_rate:
-                self.tax_rate = self.goods_id.tax_rate
-            elif not self.goods_id.tax_rate and self.order_id.partner_id.tax_rate:
-                self.tax_rate = self.order_id.partner_id.tax_rate
-            else:
-                self.tax_rate = self.env.user.company_id.output_tax_rate
+            self.tax_rate = self.goods_id.get_tax_rate(self.goods_id, self.order_id.partner_id, 'sell')
 
     @api.onchange('quantity', 'price_taxed', 'discount_rate')
     def onchange_discount_rate(self):
@@ -585,12 +634,12 @@ class SellOrderLine(models.Model):
 
 class ApproveMultiSellOrder(models.TransientModel):
     _name = "approve.multi.sell.order"
-    _description = u'批量审核销售订单'
+    _description = u'批量确认销售订单'
 
     @api.multi
     def set_default_note(self):
         """
-        设置默认值, 用来确认要批量审核的订单
+        设置默认值, 用来确认要批量确认的订单
         """
         context = self.env.context
         order_names = [order.name for order in self.env['sell.order'].browse(context.get('active_ids'))]
@@ -608,11 +657,11 @@ class ApproveMultiSellOrder(models.TransientModel):
             if order.state == 'done':
                 done_lists += order.name
         if done_lists:
-            raise UserError(u'销货订单 ' + done_lists + u' 已审核!')
+            raise UserError(u'销货订单 ' + done_lists + u' 已确认!')
         return res
 
     @api.multi
     def approve_sell_order(self):
-        """ 审核销售订单 """
+        """ 确认销售订单 """
         for order in self.env['sell.order'].search([('id', 'in', self.env.context.get('active_ids'))]):
             order.sell_order_done()

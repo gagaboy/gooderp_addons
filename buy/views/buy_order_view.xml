@@ -13,9 +13,6 @@
 					<field name="type"/>
 					<field name="partner_id"/>
 					<field name="amount" sum="合计"/>
-					<field name="planned_date"/>
-					<field name="create_uid" string="制单人"/>
-					<field name="approve_uid"/>
 					<field name='currency_id'
 						 groups='finance.group_multi_currency'/>
 					<field name="state"/>
@@ -32,8 +29,8 @@
 			<field name="arch" type="xml">
 				<form string="购货订单">
 					<header>
-						<button name="buy_order_done" states="draft" string="审核" type="object" class="oe_highlight"/>
-						<button name="buy_order_draft" states="done" string="反审核" type="object"/>
+						<button name="buy_order_done" states="draft" string="确认" type="object" class="oe_highlight"/>
+						<button name="buy_order_draft" states="done" string="撤销" type="object"/>
                           <button name="action_cancel" states="draft" string="作废" type="object"/>
 						<field name="state" widget="statusbar" statusbar_visible="draft,done" statusbar_colors='{"done":"blue"}' readonly="1"/>
 					</header>
@@ -43,7 +40,14 @@
 								name="action_view_receipt"
 								class="oe_stat_button"
 								icon="fa-truck" attrs="{'invisible':['|', ('state', 'in', ('draft')),('receipt_count','=',0)]}">
-								<field name="receipt_count" widget="statinfo" string="入库/退货单" help="Incoming Shipments"/>
+								<field name="receipt_count" widget="statinfo" string="入库单" help="Incoming Shipments"/>
+								<field name="receipt_ids" invisible="1"/>
+							</button>
+							<button type="object"
+								name="action_view_return"
+								class="oe_stat_button"
+								icon="fa-truck" attrs="{'invisible':['|', ('state', 'in', ('draft')),('return_count','=',0)]}">
+								<field name="return_count" widget="statinfo" string="退货单" help="Incoming Shipments"/>
 								<field name="receipt_ids" invisible="1"/>
 							</button>
 							<button type="object"
@@ -76,7 +80,7 @@
 						</group>
 						<field name="line_ids">
 							<tree string="购货订单行" editable="bottom">
-								<field name="goods_id" required='1'/>
+								<field name="goods_id" required='1' domain="[('not_buyable','=',False)]"/>
 								<field name="attribute_id"
 								groups='goods.multi_attrs_groups'
 								attrs="{'required': [('using_attribute','=', True)], 'readonly': [('using_attribute','!=', True)]}"/>
@@ -117,6 +121,7 @@
 							<group>
 								<field name="prepayment" attrs="{'invisible': [('invoice_by_receipt','=',False)]}"/>
 								<field name="bank_account_id" attrs="{'invisible': [('invoice_by_receipt','=',False)]}"/>
+								<field name="money_order_id" attrs="{'invisible': [('invoice_by_receipt','=',False)]}"/>
 							</group>
 						</group>
 						<group>
@@ -152,7 +157,7 @@
 					<field name="create_uid" string="制单人"/>
 					<field name="approve_uid"/>
 					<filter name="draft" string="草稿" domain="[('state','=','draft')]"/>
-					<filter name="done" string="已审核" domain="[('state','=','done')]"/>
+					<filter name="done" string="已确认" domain="[('state','=','done')]"/>
 					<separator/>
 					<filter name="not in" string="未入库" domain="[('goods_state','=',u'未入库')]"/>
 					<filter name="part in" string="部分入库" domain="[('goods_state','=',u'部分入库')]"/>

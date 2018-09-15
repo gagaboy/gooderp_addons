@@ -72,6 +72,11 @@ class TestAsset(TransactionCase):
             'finance.small_business_chart1604')
         self.asset.asset_done()
 
+    def test_asset_done_money_invoice_not_done(self):
+        ''' Test: asset done, but money invoice not done  '''
+        self.env.user.company_id.draft_invoice = True
+        self.asset.asset_done()
+
     def test_asset_draft_repeat(self):
         '''反审核报错: 重复反审核'''
         with self.assertRaises(UserError):
@@ -142,6 +147,11 @@ class TestAsset(TransactionCase):
         # 已提完
         self.asset.depreciation_number = 1
 
+    def test_core_category_unlink(self):
+        """不能删除系统创建的类别"""
+        with self.assertRaises(UserError):
+            self.env.ref('asset.asset').unlink()
+
 
 class TestCreateCleanWizard(TransactionCase):
 
@@ -204,6 +214,9 @@ class TestCreateChangWizard(TransactionCase):
             'chang_partner_id': self.env.ref('core.lenovo').id
         })
         wizard._compute_period_id()
+
+        # 生成的 money invoice 默认没有审核
+        self.env.user.company_id.draft_invoice = True
         wizard.create_chang_account()
 
 
